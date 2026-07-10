@@ -1,0 +1,213 @@
+parameters:
+  - name: playbook_folder
+    type: string
+  - name: deploy_dev
+    type: string
+    default: yes
+  - name: deploy_test
+    type: string
+    default: yes
+  - name: deploy_stage
+    type: string
+    default: yes
+  - name: deploy_prod
+    type: string
+    default: yes
+
+variables:
+  - group: cn_pipelines_common
+  - group: cn-ecs-ansible-dynatrace-oneagent
+
+stages:
+- stage: Dev_Validation
+
+  pool:
+    name: ADA-ECS-DEV
+
+  jobs:
+  - job: AnsibleFeatureJob
+    displayName: Ansible Feature Execution Testing
+    condition: or(startsWith(variables['Build.SourceBranch'], 'refs/heads/feature/'), startsWith(variables['Build.SourceBranch'], 'refs/heads/bug/'), eq(variables['Build.Reason'], 'PullRequest'))
+
+    steps:
+    - checkout: self
+
+    # Install Requirements
+    - task: Bash@3
+      displayName: Install Ansible Requirements
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)"
+        script: |
+          ansible-galaxy collection install -r collections/requirements.yml
+        failOnStderr: false
+
+    # Feature Branch Testing
+    - task: Bash@3
+      displayName: Validate Ansible Playbook
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          ansible-playbook playbook.yml -i ../../inventories/dev -e "@../../group_vars/dev.yml" -e "@../../group_vars/all.yml" --syntax-check
+          ansible-playbook playbook.yml -i ../../inventories/dev -e "@../../group_vars/dev.yml" -e "@../../group_vars/all.yml" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN"
+        failOnStderr: false
+      env:
+        DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+
+- stage: Dev_Deploy
+  dependsOn: Dev_Validation
+  condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), contains(variables['Build.SourceBranch'], 'refs/heads/bug/')), eq('${{ parameters.deploy_dev }}', 'yes'))
+
+  pool:
+    name: ADA-ECS-DEV
+
+  jobs:
+  - job: AnsibleDeployDev
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # DEV Deployment
+    - task: Bash@3
+      displayName: Dev Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          ansible-playbook playbook.yml -i ../../inventories/dev -e "@../../group_vars/dev.yml" -e "@../../group_vars/all.yml" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN" 
+        failOnStderr: false
+      env:
+        DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+
+- stage: Test_Deploy
+  dependsOn: Dev_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq('${{ parameters.deploy_test }}', 'yes'))
+
+  pool:
+    name: ADA-ECS-DEV
+
+  jobs:
+  - job: AnsibleDeployTest
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # TEST Deployment
+    - task: Bash@3
+      displayName: Test Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          ansible-playbook playbook.yml -i ../../inventories/test -e "@../../group_vars/test.yml" -e "@../../group_vars/all.yml" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN"
+        failOnStderr: false
+      env:
+        DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+
+- stage: Int_Stage_Deploy
+  dependsOn: Test_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq('${{ parameters.deploy_stage }}', 'yes'))
+
+  pool:
+    name: ADA-ECS-PROD
+
+  jobs:
+  - job: AnsibleDeployStage
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # STAGE Deployment
+    - task: Bash@3
+      displayName: Stage Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          echo "No Servers Available Yet ..."
+          #ansible-playbook playbook.yml -i ../../inventories/stage -e "@../../group_vars/stage.yml" -e "@../../group_vars/internal-stage.yml" -e "@../../group_vars/all.yml" -l k8s_internal -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN"
+        failOnStderr: false
+      env:
+        DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+
+- stage: Ext_Stage_Deploy
+  dependsOn: Test_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq('${{ parameters.deploy_stage }}', 'yes'))
+
+  pool:
+    name: WS-ECS-STAGE
+
+  jobs:
+  - job: AnsibleDeployStage
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # STAGE Deployment
+    - task: Bash@3
+      displayName: Stage Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          ansible-playbook playbook.yml -i ../../inventories/stage -e "@../../group_vars/stage.yml" -e "@../../group_vars/external-stage.yml" -e "@../../group_vars/all.yml" -l k8s_external -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN"
+        failOnStderr: false
+      env:
+        DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+
+- stage: Int_Prod_Deploy
+  dependsOn: Int_Stage_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq('${{ parameters.deploy_prod }}', 'yes'))
+
+  pool:
+    name: ADA-ECS-PROD
+
+  jobs:
+  - job: AnsibleDeployProd
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # PROD Deployment
+    - task: Bash@3
+      displayName: Prod Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          ansible-playbook playbook.yml -i ../../inventories/prod -e "@../../group_vars/prod.yml" -e "@../../group_vars/internal-prod.yml" -e "@../../group_vars/all.yml" -l k8s_internal -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN"
+        failOnStderr: false
+      env:
+        DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+
+- stage: Ext_Prod_Deploy
+  dependsOn: Ext_Stage_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq('${{ parameters.deploy_prod }}', 'yes'))
+
+  pool:
+    name: ADA-ECS-PROD
+
+  jobs:
+  - job: AnsibleDeployProd
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # PROD Deployment
+    - task: Bash@3
+      displayName: Prod Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          ansible-playbook playbook.yml -i ../../inventories/prod -e "@../../group_vars/prod.yml" -e "@../../group_vars/external-prod.yml" -e "@../../group_vars/all.yml" -l k8s_external -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN"
+        failOnStderr: false
+      env:
+        DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)

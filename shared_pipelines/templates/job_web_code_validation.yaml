@@ -1,0 +1,32 @@
+parameters:
+- name: app_name
+  type: string
+- name: docker_folder
+  type: string
+
+jobs:
+- job: CodeValidationJob
+  displayName: Code Validation
+  dependsOn: PrepJob
+
+  pool:
+    name: $(ADADEVTESTINGPOOL)
+
+  variables:
+  - group: ${{ parameters.app_name }}_dev
+  - group: cn_pipelines_argocd_dev
+   
+  steps:
+  - checkout: self
+    fetchDepth: 0
+    clean: true
+    persistCredentials: true
+
+  - task: Bash@3
+    displayName: Pre-Build Lint Validation
+    inputs:
+      workingDirectory: $(Build.SourcesDirectory)/${{ parameters.docker_folder }}
+      targetType: 'inline'
+      script: |
+        npm ci
+        npx eslint .

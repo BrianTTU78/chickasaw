@@ -1,0 +1,589 @@
+parameters:
+  - name: app_name
+    type: string
+  - name: app_type
+    type: string
+  - name: app_location
+    type: string
+  - name: docker_folder
+    type: string
+
+stages:
+- stage: DockerBuildStage
+  displayName: 'Docker Build'
+
+  variables:
+    - template: shared_global_variables.yaml
+    - group: cn_pipelines_common
+    - group: ${{ parameters.app_name }}_dev
+
+  jobs:
+  - job: PrepJob
+    displayName: Pipeline Prep
+
+    pool:
+      name: $(ADADEVBUILDPOOL)
+
+    workspace:
+      clean: all
+
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: true
+    
+    - checkout: shared_pipelines
+      clean: true
+
+    - task: Bash@3
+      displayName: Find Latest Tag
+      name: FindGitTag
+      inputs:
+        targetType: 'filePath'
+        filePath: '$(Build.SourcesDirectory)/cn_ecs_shared_pipelines/scripts/manage_git_tags.sh'
+        workingDirectory: "$(Build.SourcesDirectory)/$(Build.Repository.Name)"
+        arguments: 'FIND "$(APP_VERSION)"'
+      env:
+        APP_VERSION: $(APP_VERSION)
+        DEBUG: $(DEBUG)
+
+  - job: DockerBuildJob
+    dependsOn: PrepJob
+    displayName: Docker Build
+
+    pool:
+      name: $(ADADEVBUILDPOOL)
+
+    variables:
+    - group: ${{ parameters.app_name }}_dev
+    - group: cn_pipelines_argocd_dev
+    - name: GIT_TAG
+      value: $[ dependencies.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+ 
+    steps:
+    - checkout: self
+      fetchDepth: 0
+      clean: true
+      persistCredentials: true
+
+    - checkout: shared_pipelines
+      clean: true
+
+    # Copy Cert
+    - task: Bash@3
+      displayName: Move Root CA Cert
+      inputs:
+        workingDirectory: $(Build.SourcesDirectory)/cn-ecs-d365-integration/
+        targetType: 'inline'
+        script: |
+          cp $(Build.SourcesDirectory)/cn-ecs-d365-integration/certs/chickasaw-root-ca.crt .
+          ls -lart
+  
+    # Build Docker Image
+    - task: Bash@3
+      name: DockerBuildJob
+      displayName: Build Image
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/cn-ecs-d365-integration"
+        script: |
+          IMAGE_NAME="${{ parameters.app_name }}:${GIT_TAG}"
+          DOCKERFILE_PATH="${{ parameters.docker_folder }}/dockerfile"
+          docker build --no-cache --tag "${IMAGE_NAME}" --file "${DOCKERFILE_PATH}" .
+          FILE_IMAGE_NAME="${IMAGE_NAME//:/-}"
+          docker save "${IMAGE_NAME}" -o "$(Build.ArtifactStagingDirectory)/${FILE_IMAGE_NAME}.tar"
+
+    - task: Bash@3
+      displayName: Tag GIT Repo
+      name: SetGitTag
+      inputs:
+        targetType: 'filePath'
+        filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/manage_git_tags.sh'
+        workingDirectory: "$(Build.SourcesDirectory)/$(Build.Repository.Name)"
+        arguments: 'CREATE ${APP_VERSION} ${GIT_TAG}'
+      env:
+        APP_NAME: ${{ parameters.app_name }}
+        APP_VERSION: $(APP_VERSION)
+        GIT_TAG: $(GIT_TAG)
+        DEBUG: $(DEBUG)
+
+    - task: PublishBuildArtifacts@1
+      displayName: Publish Artifacts
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'docker-image'
+        publishLocation: 'Container'
+
+- stage: DeployDev
+  displayName: 'Deploy Dev'
+  dependsOn:
+    - DockerBuildStage
+   
+  variables:
+  - template: shared_global_variables.yaml
+  - group: cn_pipelines_common
+  - group: ${{ parameters.app_name }}_dev
+  - group: cn_pipelines_argocd_dev
+  - name: GIT_TAG
+    value: $[ stageDependencies.DockerBuildStage.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+
+  pool:
+    name: $(ADADEVBUILDPOOL)
+
+  jobs:
+  - job: DockerDeployJob
+    displayName: Docker Deploy
+
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: true
+    
+    - checkout: shared_pipelines
+      clean: true
+
+    - checkout: helm_charts
+      clean: true
+      persistCredentials: true
+
+    - template: templates/task_download_docker_artifact.yaml
+
+    - task: Bash@3
+      displayName: Copy Artifacts
+      name: CopyArtifacts
+      inputs:
+        targetType: 'filePath'
+        filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/copy_artifacts.sh'
+        workingDirectory: "$(Pipeline.Workspace)/docker-image/"
+        arguments: 'DEV ${APP_NAME} ${GIT_TAG}'
+      env:
+        APP_NAME: ${{ parameters.app_name }}
+        GIT_TAG: $(GIT_TAG)
+        DEBUG: $(DEBUG)
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: dev_kubeconfig.yaml
+
+    # UPDATE SECRETS
+    - template: templates/task_update_k8s_secrets.yaml
+      parameters:
+        app_name: ${{ parameters.app_name }} 
+    
+    # UPDATE HELM CHART
+    - template: templates/task_update_helm_chart.yaml
+      parameters:
+        env: DEV
+        app_name: ${{ parameters.app_name }}
+
+    # SYNC ARGOCD
+    - template: templates/task_sync_argocd.yaml
+      parameters:
+        env: DEV
+        app_name: ${{ parameters.app_name }}
+
+- stage: DeployTest
+  displayName: 'Deploy Test'
+  dependsOn:
+    - DockerBuildStage
+    - DeployDev
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  
+  variables:
+  - template: shared_global_variables.yaml
+  - group: ${{ parameters.app_name }}_test
+  - group: cn_pipelines_argocd_test
+  - name: GIT_TAG
+    value: $[ stageDependencies.DockerBuildStage.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+
+  jobs:
+  - deployment: DeployTest
+    environment: Test2
+
+    pool:
+      name: ADA-ECS-DEV-Container-Agents
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:      
+          - checkout: self
+            clean: true
+            persistCredentials: true
+    
+          - checkout: shared_pipelines
+            clean: true
+
+          - checkout: helm_charts
+            clean: true
+            persistCredentials: true
+
+          - template: templates/task_download_docker_artifact.yaml
+
+          - task: Bash@3
+            displayName: Copy Artifacts
+            name: CopyArtifacts
+            inputs:
+              targetType: 'filePath'
+              filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/copy_artifacts.sh'
+              workingDirectory: "$(Pipeline.Workspace)/docker-image/"
+              arguments: 'TEST ${APP_NAME} ${GIT_TAG}'
+            env:
+              APP_NAME: ${{ parameters.app_name }}
+              GIT_TAG: $(GIT_TAG)
+              DEBUG: $(DEBUG)
+
+          # Download Kubeconfig
+          - task: DownloadSecureFile@1
+            name: kubeconfig
+            inputs:
+              secureFile: test_kubeconfig.yaml
+
+          # SET SECRETS
+          - template: templates/task_update_k8s_secrets.yaml
+            parameters:
+              app_name: ${{ parameters.app_name }} 
+
+          # UPDATE HELM CHART
+          - template: templates/task_update_helm_chart.yaml
+            parameters:
+              env: TEST
+              app_name: ${{ parameters.app_name }}
+
+          # SYNC ARGOCD
+          - template: templates/task_sync_argocd.yaml@shared_pipelines
+            parameters:
+              env: TEST
+              app_name: ${{ parameters.app_name }}
+
+          - task: Bash@3
+            displayName: Notify Team
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "Teams API Notification Here"
+
+#- ${{ if or(eq(parameters.app_location, 'internal'), eq(parameters.app_location, 'all')) }}:
+#  - stage: DeployINTStage
+#    displayName: 'Deploy INT Stage'
+#    dependsOn:
+#      - DockerBuildStage
+#      - DeployTest
+#    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+#
+#    variables:
+#    - template: shared_global_variables.yaml
+#    - group: ${{ parameters.app_name }}_int_stage
+#    - group: cn_pipelines_argocd_int_stage
+#    - name: GIT_TAG
+#      value: $[ stageDependencies.DockerBuildStage.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+#
+#    jobs:
+#    - deployment: DeployINTStage
+#      environment: Stage-INT
+#
+#      pool:
+#        name: WS-ECS-STAGE-Container-Agents
+#
+#      strategy:
+#        runOnce:
+#          deploy:
+#            steps:      
+#            - checkout: self
+#              clean: true
+#              persistCredentials: true
+#
+#            - checkout: shared_pipelines
+#              clean: true
+#
+#            - checkout: helm_charts
+#              clean: true
+#              persistCredentials: true
+#
+#            - template: templates/task_download_docker_artifact.yaml
+#
+#            - task: Bash@3
+#              displayName: Copy Artifacts
+#              name: CopyArtifacts
+#              inputs:
+#                targetType: 'filePath'
+#                filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/copy_artifacts.sh'
+#                workingDirectory: "$(Pipeline.Workspace)/docker-image/"
+#                arguments: 'STAGE-INT ${APP_NAME} ${GIT_TAG}'
+#              env:
+#                APP_NAME: ${{ parameters.app_name }}
+#                GIT_TAG: $(GIT_TAG)
+#                DEBUG: $(DEBUG)
+#
+#            # Download Kubeconfig
+#            - task: DownloadSecureFile@1
+#              name: kubeconfig
+#              inputs:
+#                secureFile: stage_int_kubeconfig.yaml
+#
+#            # SET SECRETS
+#            - template: templates/task_update_k8s_secrets.yaml
+#              parameters:
+#                app_name: ${{ parameters.app_name }} 
+#
+#            # UPDATE HELM CHART
+#            - template: templates/task_update_helm_chart.yaml
+#              parameters:
+#                env: STAGE-INT
+#                app_name: ${{ parameters.app_name }}
+#
+#            # SYNC ARGOCD
+#            - template: templates/task_sync_argocd.yaml@shared_pipelines
+#              parameters:
+#                env: STAGE-INT
+#                app_name: ${{ parameters.app_name }}
+#
+#            - task: Bash@3
+#              displayName: Notify Team
+#              inputs:
+#                targetType: 'inline'
+#                script: |
+#                  echo "Teams API Notification Here"
+#
+#- ${{ if or(eq(parameters.app_location, 'external'), eq(parameters.app_location, 'all')) }}:
+#  - stage: DeployEXTStage
+#    displayName: 'Deploy EXT Stage'
+#    dependsOn:
+#      - DockerBuildStage
+#      - DeployTest
+#    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+#    
+#    variables:
+#    - template: shared_global_variables.yaml
+#    - group: ${{ parameters.app_name }}_ext_stage
+#    - group: cn_pipelines_argocd_ext_stage
+#    - name: GIT_TAG
+#      value: $[ stageDependencies.DockerBuildStage.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+#  
+#    jobs:
+#    - deployment: DeployEXTStage
+#      environment: Stage-EXT
+#  
+#      pool:
+#        name: WS-ECS-STAGE-Container-Agents
+#  
+#      strategy:
+#        runOnce:
+#          deploy:
+#            steps:      
+#            - checkout: self
+#              clean: true
+#              persistCredentials: true
+#      
+#            - checkout: shared_pipelines
+#              clean: true
+#  
+#            - checkout: helm_charts
+#              clean: true
+#              persistCredentials: true
+#  
+#            - template: templates/task_download_docker_artifact.yaml
+#  
+#            - task: Bash@3
+#              displayName: Copy Artifacts
+#              name: CopyArtifacts
+#              inputs:
+#                targetType: 'filePath'
+#                filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/copy_artifacts.sh'
+#                workingDirectory: "$(Pipeline.Workspace)/docker-image/"
+#                arguments: 'STAGE-EXT ${APP_NAME} ${GIT_TAG}'
+#              env:
+#                APP_NAME: ${{ parameters.app_name }}
+#                GIT_TAG: $(GIT_TAG)
+#                DEBUG: $(DEBUG)
+#  
+#            # Download Kubeconfig
+#            - task: DownloadSecureFile@1
+#              name: kubeconfig
+#              inputs:
+#                secureFile: stage_ext_kubeconfig.yaml
+#  
+#            # SET SECRETS
+#            - template: templates/task_update_k8s_secrets.yaml
+#              parameters:
+#                app_name: ${{ parameters.app_name }} 
+#  
+#            # UPDATE HELM CHART
+#            - template: templates/task_update_helm_chart.yaml
+#              parameters:
+#                env: STAGE-EXT
+#                app_name: ${{ parameters.app_name }}
+#  
+#            # SYNC ARGOCD
+#            - template: templates/task_sync_argocd.yaml@shared_pipelines
+#              parameters:
+#                env: STAGE-EXT
+#                app_name: ${{ parameters.app_name }}
+#  
+#            - task: Bash@3
+#              displayName: Notify Team
+#              inputs:
+#                targetType: 'inline'
+#                script: |
+#                  echo "Teams API Notification Here"
+#
+#
+#- ${{ if or(eq(parameters.app_location, 'internal'), eq(parameters.app_location, 'all')) }}:
+#  - stage: DeployINTProd
+#    displayName: 'Deploy INT Prod'
+#    dependsOn:
+#      - DockerBuildStage
+#      - DeployINTStage
+#    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+#    
+#    variables:
+#    - template: shared_global_variables.yaml
+#    - group: ${{ parameters.app_name }}_int_prod
+#    - group: cn_pipelines_argocd_int_prod
+#    - name: GIT_TAG
+#      value: $[ stageDependencies.DockerBuildStage.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+#  
+#    jobs:
+#    - deployment: DeployINTProd
+#      environment: Prod-INT
+#  
+#      pool:
+#        name: ADA-ECS-PROD-Container-Agents
+#  
+#      strategy:
+#        runOnce:
+#          deploy:
+#            steps:      
+#            - checkout: self
+#              clean: true
+#              persistCredentials: true
+#      
+#            - checkout: shared_pipelines
+#              clean: true
+#  
+#            - checkout: helm_charts
+#              clean: true
+#              persistCredentials: true
+#  
+#            - template: templates/task_download_docker_artifact.yaml
+#  
+#            - task: Bash@3
+#              displayName: Copy Artifacts
+#              name: CopyArtifacts
+#              inputs:
+#                targetType: 'filePath'
+#                filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/copy_artifacts.sh'
+#                workingDirectory: "$(Pipeline.Workspace)/docker-image/"
+#                arguments: 'PROD ${APP_NAME} ${GIT_TAG}'
+#              env:
+#                APP_NAME: ${{ parameters.app_name }}
+#                GIT_TAG: $(GIT_TAG)
+#                DEBUG: $(DEBUG)
+#  
+#            # Download Kubeconfig
+#            - task: DownloadSecureFile@1
+#              name: kubeconfig
+#              inputs:
+#                secureFile: prod_int_kubeconfig.yaml
+#  
+#            - template: templates/task_update_k8s_secrets.yaml
+#  
+#            # UPDATE HELM CHART
+#            - template: templates/task_update_helm_chart.yaml
+#              parameters:
+#                env: PROD-INT
+#                app_name: ${{ parameters.app_name }}
+#  
+#            # SYNC ARGOCD
+#            - template: templates/task_sync_argocd.yaml@shared_pipelines
+#              parameters:
+#                env: PROD-INT
+#                app_name: ${{ parameters.app_name }}
+#  
+#            - task: Bash@3
+#              displayName: Notify Team
+#              inputs:
+#                targetType: 'inline'
+#                script: |
+#                  echo "Teams API Notification Here"
+#
+#- ${{ if or(eq(parameters.app_location, 'external'), eq(parameters.app_location, 'all')) }}:
+#  - stage: DeployEXTProd
+#    displayName: 'Deploy EXT Prod'
+#    dependsOn:
+#      - DockerBuildStage
+#      - DeployEXTStage
+#    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+#    
+#    variables:
+#    - template: shared_global_variables.yaml
+#    - group: ${{ parameters.app_name }}_ext_prod
+#    - group: cn_pipelines_argocd_ext_prod
+#    - name: GIT_TAG
+#      value: $[ stageDependencies.DockerBuildStage.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+#  
+#    jobs:
+#    - deployment: DeployEXTProd
+#      environment: Prod-EXT
+#  
+#      pool:
+#        name: ADA-ECS-PROD-Container-Agents
+#  
+#      strategy:
+#        runOnce:
+#          deploy:
+#            steps:      
+#            - checkout: self
+#              clean: true
+#              persistCredentials: true
+#      
+#            - checkout: shared_pipelines
+#              clean: true
+#  
+#            - checkout: helm_charts
+#              clean: true
+#              persistCredentials: true
+#  
+#            - template: templates/task_download_docker_artifact.yaml
+#  
+#            - task: Bash@3
+#              displayName: Copy Artifacts
+#              name: CopyArtifacts
+#              inputs:
+#                targetType: 'filePath'
+#                filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/copy_artifacts.sh'
+#                workingDirectory: "$(Pipeline.Workspace)/docker-image/"
+#                arguments: 'PROD ${APP_NAME} ${GIT_TAG}'
+#              env:
+#                APP_NAME: ${{ parameters.app_name }}
+#                GIT_TAG: $(GIT_TAG)
+#                DEBUG: $(DEBUG)
+#  
+#            # Download Kubeconfig
+#            - task: DownloadSecureFile@1
+#              name: kubeconfig
+#              inputs:
+#                secureFile: prod_ext_kubeconfig.yaml
+#  
+#            - template: templates/task_update_k8s_secrets.yaml
+#  
+#            # UPDATE HELM CHART
+#            - template: templates/task_update_helm_chart.yaml
+#              parameters:
+#                env: PROD-EXT
+#                app_name: ${{ parameters.app_name }}
+#  
+#            # SYNC ARGOCD
+#            - template: templates/task_sync_argocd.yaml@shared_pipelines
+#              parameters:
+#                env: PROD-EXT
+#                app_name: ${{ parameters.app_name }}
+#  
+#            - task: Bash@3
+#              displayName: Notify Team
+#              inputs:
+#                targetType: 'inline'
+#                script: |
+#                  echo "Teams API Notification Here"     

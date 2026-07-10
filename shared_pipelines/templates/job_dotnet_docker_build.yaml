@@ -1,0 +1,50 @@
+parameters:
+- name: app_name
+  type: string
+- name: docker_folder
+  type: string
+
+jobs:
+- job: DockerBuildJob
+  dependsOn: PrepJob
+  displayName: Docker Build
+
+  pool:
+    name: $(ADADEVBUILDPOOL)
+
+  variables:
+  - group: ${{ parameters.app_name }}_dev
+  - group: cn_pipelines_argocd_dev
+  - name: GIT_TAG
+    value: $[ dependencies.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+ 
+  steps:
+  - checkout: self
+    fetchDepth: 0
+    clean: true
+    persistCredentials: true
+
+  - task: Bash@3
+    displayName: Move Root CA Cert
+    inputs:
+      workingDirectory: $(Build.SourcesDirectory)/${{ parameters.docker_folder }}
+      targetType: 'inline'
+      script: |
+        cp $(Build.SourcesDirectory)/certs/chickasaw-root-ca.crt .
+
+  - task: Bash@3
+    displayName: Docker Build
+    inputs:
+      workingDirectory: $(Build.SourcesDirectory)/${{ parameters.docker_folder }}
+      targetType: inline
+      script: |
+        docker build --network=host -t ${{ parameters.app_name }}:${GIT_TAG} -f Dockerfile .
+        docker save ${{ parameters.app_name }}:${GIT_TAG} -o $(Build.ArtifactStagingDirectory)/${{ parameters.app_name }}-${GIT_TAG}.tar
+    env:
+      GIT_TAG: $(GIT_TAG)
+  - task: PublishBuildArtifacts@1
+    displayName: Publish Artifacts
+    inputs:
+      PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+      ArtifactName: 'docker-image'
+      publishLocation: 'Container'

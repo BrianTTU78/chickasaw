@@ -1,0 +1,22 @@
+parameters:
+- name: env
+  type: string
+
+- name: app_name
+  type: string
+
+steps:
+- task: Bash@3
+  displayName: ArgoCD Sync
+  name: argoCDSync
+  inputs:
+    targetType: 'filePath'
+    filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/trigger_argocd_sync.sh'
+    workingDirectory: "$(Build.SourcesDirectory)/$(Build.Repository.Name)"
+    arguments: '${ENV} ${ARGOCD_URL} ${APP_NAME}'
+  env:
+    ENV: ${{ parameters.env }}
+    APP_NAME: ${{ parameters.app_name }}
+    ARGOCD_URL: $(ARGOCD_URL)
+    ARGOCD_AUTH_TOKEN: $(ARGOCD_PIPELINE_TOKEN)
+    DEBUG: $(DEBUG)

@@ -1,0 +1,294 @@
+parameters:
+  - name: app_name
+    type: string
+  - name: app_type
+    type: string
+  - name: app_location
+    type: string
+
+stages:
+- stage: Dev_Validation
+
+  pool:
+    name: ADA-ECS-DEV-Container-Agents
+
+  jobs:
+  - job: FeatureJob
+    displayName: Helm Feature Execution Testing
+    condition: or(startswith(variables['Build.SourceBranch'], 'refs/heads/feature/'), startswith(variables['Build.SourceBranch'], 'refs/heads/bug/'), eq(variables['Build.Reason'], 'PullRequest'))
+
+    steps:
+    - checkout: self
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: dev_kubeconfig.yaml
+
+    # Validate Helm
+    - task: Bash@3
+      displayName: Validate Helm
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/helm_charts/${{ parameters.app_name }}"
+        script: |
+          echo "#### HELM DEPENDENCY UPDATE ####"
+          helm dependency update
+
+          echo "#### HELM LINT ####"
+          helm lint . -f values.yaml -f dev-values.yaml
+
+          echo "#### TEMPLATE RENDER TEST ####"
+          helm template ${{ parameters.app_name }} . -n ${{ parameters.app_name }} -f values.yaml -f dev-values.yaml --debug
+
+        failOnStderr: false
+
+- stage: Dev_Deploy
+  dependsOn: Dev_Validation
+  condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), startsWith(variables['Build.SourceBranch'], 'refs/heads/bug/')))
+
+  pool:
+    name: ADA-ECS-DEV-Container-Agents
+
+  jobs:
+  - job: DeployDev
+    displayName: Helm Real-time Execution
+
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: true
+
+    - checkout: shared_pipelines
+      clean: true
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: dev_kubeconfig.yaml
+  
+    # UPDATE SECRETS
+    - template: templates/task_update_k8s_secrets.yaml
+      parameters:
+        app_name: ${{ parameters.app_name }} 
+
+    # Deploy App with ArgoCD
+    - task: Bash@3
+      displayName: Deploy DEV
+      inputs:
+        workingDirectory: '$(Build.SourcesDirectory)/$(Build.Repository.Name)'
+        filePath: '$(Build.SourcesDirectory)/cn_ecs_shared_pipelines/scripts/argocd_deployment.sh'
+        arguments: 'dev ${{ parameters.app_name }}'
+      env:
+        ARGOCD_AUTH_TOKEN: $(ARGOCD_AUTH_TOKEN)
+        KUBECONFIG: $(kubeconfig.secureFilePath)
+
+- stage: Test_Deploy
+  dependsOn: Dev_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  pool:
+    name: ADA-ECS-DEV-Container-Agents
+
+  jobs:
+  - job: DeployTest
+    displayName: Helm Real-time Execution
+
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: true
+
+    - checkout: shared_pipelines
+      clean: true
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: test_kubeconfig.yaml
+
+    # UPDATE SECRETS
+    - template: templates/task_update_k8s_secrets.yaml
+      parameters:
+        app_name: ${{ parameters.app_name }} 
+  
+    # Deploy App with ArgoCD
+    - task: Bash@3
+      displayName: Deploy TEST
+      inputs:
+        workingDirectory: '$(Build.SourcesDirectory)/$(Build.Repository.Name)'
+        filePath: '$(Build.SourcesDirectory)/cn_ecs_shared_pipelines/scripts/argocd_deployment.sh'
+        arguments: 'test ${{ parameters.app_name }}'
+      env:
+        ARGOCD_AUTH_TOKEN: $(ARGOCD_AUTH_TOKEN)
+        KUBECONFIG: $(kubeconfig.secureFilePath)
+
+- ${{ if or(eq(parameters.app_location, 'internal'), eq(parameters.app_location, 'all')) }}:
+  - stage: Stage_INT_Deploy
+    dependsOn: Test_Deploy
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+    pool:
+      name: WS-ECS-STAGE-Container-Agents
+
+    jobs:
+    - job: DeployStage
+      displayName: Helm Real-time Execution
+
+      steps:
+      - checkout: self
+        clean: true
+        persistCredentials: true
+
+      - checkout: shared_pipelines
+        clean: true
+
+      # Download Kubeconfig
+      - task: DownloadSecureFile@1
+        name: kubeconfig
+        inputs:
+          secureFile: stage_int_kubeconfig.yaml
+
+      # UPDATE SECRETS
+      - template: templates/task_update_k8s_secrets.yaml
+        parameters:
+          app_name: ${{ parameters.app_name }} 
+
+      # Deploy App with ArgoCD
+      - task: Bash@3
+        displayName: Deploy STAGE
+        inputs:
+          workingDirectory: '$(Build.SourcesDirectory)/$(Build.Repository.Name)'
+          filePath: '$(Build.SourcesDirectory)/cn_ecs_shared_pipelines/scripts/argocd_deployment.sh'
+          arguments: 'stage-int ${{ parameters.app_name }}'
+        env:
+          ARGOCD_AUTH_TOKEN: $(ARGOCD_AUTH_TOKEN)
+          KUBECONFIG: $(kubeconfig.secureFilePath)
+
+- ${{ if or(eq(parameters.app_location, 'external'), eq(parameters.app_location, 'all')) }}:
+  - stage: Stage_EXT_Deploy
+    dependsOn: Test_Deploy
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    pool:
+      name: WS-ECS-STAGE-Container-Agents
+
+    jobs:
+    - job: DeployStage
+      displayName: Helm Real-time Execution
+
+      steps:
+      - checkout: self
+        clean: true
+        persistCredentials: true
+
+      - checkout: shared_pipelines
+        clean: true
+
+      # Download Kubeconfig
+      - task: DownloadSecureFile@1
+        name: kubeconfig
+        inputs:
+          secureFile: stage_ext_kubeconfig.yaml
+
+      # UPDATE SECRETS
+      - template: templates/task_update_k8s_secrets.yaml
+        parameters:
+          app_name: ${{ parameters.app_name }} 
+
+      # Deploy App with ArgoCD
+      - task: Bash@3
+        displayName: Deploy STAGE
+        inputs:
+          workingDirectory: '$(Build.SourcesDirectory)/$(Build.Repository.Name)'
+          filePath: '$(Build.SourcesDirectory)/cn_ecs_shared_pipelines/scripts/argocd_deployment.sh'
+          arguments: 'stage-ext ${{ parameters.app_name }}'
+        env:
+          ARGOCD_AUTH_TOKEN: $(ARGOCD_AUTH_TOKEN)
+          KUBECONFIG: $(kubeconfig.secureFilePath)
+
+- ${{ if or(eq(parameters.app_location, 'internal'), eq(parameters.app_location, 'all')) }}:
+  - stage: Prod_INT_Deploy
+    dependsOn: Stage_INT_Deploy
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+    pool:
+      name: ADA-ECS-PROD-Container-Agents
+
+    jobs:
+    - job: DeployStage
+      displayName: Helm Real-time Execution
+
+      steps:
+      - checkout: self
+        clean: true
+        persistCredentials: true
+
+      - checkout: shared_pipelines
+        clean: true
+
+      # Download Kubeconfig
+      - task: DownloadSecureFile@1
+        name: kubeconfig
+        inputs:
+          secureFile: prod_int_kubeconfig.yaml
+
+      # UPDATE SECRETS
+      - template: templates/task_update_k8s_secrets.yaml
+        parameters:
+          app_name: ${{ parameters.app_name }} 
+
+      # Deploy App with ArgoCD
+      - task: Bash@3
+        displayName: Deploy PROD
+        inputs:
+          workingDirectory: '$(Build.SourcesDirectory)/$(Build.Repository.Name)'
+          filePath: '$(Build.SourcesDirectory)/cn_ecs_shared_pipelines/scripts/argocd_deployment.sh'
+          arguments: 'prod-int ${{ parameters.app_name }}'
+        env:
+          ARGOCD_AUTH_TOKEN: $(ARGOCD_AUTH_TOKEN)
+          KUBECONFIG: $(kubeconfig.secureFilePath)
+
+- ${{ if or(eq(parameters.app_location, 'external'), eq(parameters.app_location, 'all')) }}:
+  - stage: Prod_EXT_Deploy
+    dependsOn: Stage_EXT_Deploy
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+    pool:
+      name: ADA-ECS-PROD-Container-Agents
+
+    jobs:
+    - job: DeployStage
+      displayName: Helm Real-time Execution
+
+      steps:
+      - checkout: self
+        clean: true
+        persistCredentials: true
+
+      - checkout: shared_pipelines
+        clean: true
+
+      # Download Kubeconfig
+      - task: DownloadSecureFile@1
+        name: kubeconfig
+        inputs:
+          secureFile: prod_ext_kubeconfig.yaml
+
+      # UPDATE SECRETS
+      - template: templates/task_update_k8s_secrets.yaml
+        parameters:
+          app_name: ${{ parameters.app_name }} 
+
+      # Deploy App with ArgoCD
+      - task: Bash@3
+        displayName: Deploy PROD
+        inputs:
+          workingDirectory: '$(Build.SourcesDirectory)/$(Build.Repository.Name)'
+          filePath: '$(Build.SourcesDirectory)/cn_ecs_shared_pipelines/scripts/argocd_deployment.sh'
+          arguments: 'prod-ext ${{ parameters.app_name }}'
+        env:
+          ARGOCD_AUTH_TOKEN: $(ARGOCD_AUTH_TOKEN)
+          KUBECONFIG: $(kubeconfig.secureFilePath)

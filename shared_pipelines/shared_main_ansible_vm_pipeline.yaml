@@ -1,0 +1,186 @@
+parameters:
+  - name: playbook_folder
+    type: string
+  - name: deploy_dev
+    type: string
+    default: yes
+  - name: deploy_test
+    type: string
+    default: yes
+  - name: deploy_stage
+    type: string
+    default: yes
+  - name: deploy_prod
+    type: string
+    default: yes
+
+variables:
+  - group: cn_pipelines_common
+  - group: cn_pipelines_ansible_common
+
+stages:
+- stage: Dev_Validation
+
+  pool:
+    name: ADA-ECS-DEV
+
+  jobs:
+  - job: AnsibleFeatureJob
+    displayName: Ansible Feature Execution Testing
+    condition: or(or(startsWith(variables['Build.SourceBranch'], 'refs/heads/feature/'), startsWith(variables['Build.SourceBranch'], 'refs/heads/bug/')), eq(variables['Build.Reason'], 'PullRequest'))
+
+    steps:
+    - checkout: self
+
+    # Feature Branch Testing
+    - task: Bash@3
+      displayName: Validate Ansible Playbook
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          ls -l
+          ansible-playbook playbook.yml -e "@../../group_vars/dev.yml"  -e "ADO_PAT=$ADO_PAT" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN" -i ../../inventories/dev -C -D
+        failOnStderr: false
+
+- ${{ if eq(parameters.deploy_dev, 'yes') }}:
+  - stage: Deploy_Dev
+    dependsOn: Dev_Validation
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+    pool:
+      name: ADA-ECS-DEV
+
+    jobs:
+    - job: DeployDev
+      displayName: Ansible Real-time Execution
+
+      steps:
+      - checkout: self
+
+      - ${{ if contains(parameters.playbook_folder, 'ado_agent_servers') }}:
+        - template: templates/task_download_private_key.yaml
+
+      # DEV Deployment
+      - task: Bash@3
+        displayName: Dev Deployment
+        inputs:
+          targetType: 'inline'
+          workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+          script: |
+            ansible-playbook playbook.yml -i ../../inventories/dev -e "@../../group_vars/dev.yml" -e "ADO_PAT=$ADO_PAT" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN"
+          failOnStderr: false
+        env:
+          ADO_PAT: $(ADO_PAT)
+          DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+
+- ${{ if eq(parameters.deploy_test, 'yes') }}:
+  - stage: Deploy_Test
+    ${{ if eq(parameters.deploy_dev, 'yes') }}:
+      dependsOn: Deploy_Dev
+    ${{ else }}:
+      dependsOn: Dev_Validation
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+    pool:
+      name: ADA-ECS-DEV
+
+    jobs:
+    - job: DeployTest
+      displayName: Ansible Real-time Execution
+
+      steps:
+      - checkout: self
+
+      - ${{ if contains(parameters.playbook_folder, 'ado_agent_servers') }}:
+        - template: templates/task_download_private_key.yaml
+
+      # Test Deployment
+      - task: Bash@3
+        displayName: Test Deployment
+        inputs:
+          targetType: 'inline'
+          workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+          script: |
+            ansible-playbook playbook.yml -i ../../inventories/test -e "@../../group_vars/test.yml" -e "ADO_PAT=$ADO_PAT" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN"
+          failOnStderr: false
+        env:
+          ADO_PAT: $(ADO_PAT)
+          DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+
+- ${{ if eq(parameters.deploy_stage, 'yes') }}:
+  - stage: Deploy_Stage
+    ${{ if eq(parameters.deploy_test, 'yes') }}:
+      dependsOn: Deploy_Test
+    ${{ elseif eq(parameters.deploy_dev, 'yes') }}:
+      dependsOn: Deploy_Dev
+    ${{ else }}:
+      dependsOn: Dev_Validation
+      
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+    pool:
+      name: WS-ECS-STAGE
+
+    jobs:
+    - job: DeployStage
+      displayName: Ansible Real-time Execution
+
+      steps:
+      - checkout: self
+
+      - ${{ if contains(parameters.playbook_folder, 'ado_agent_servers') }}:
+        - template: templates/task_download_private_key.yaml
+
+      # STAGE Deployment
+      - task: Bash@3
+        displayName: Stage Deployment
+        inputs:
+          targetType: 'inline'
+          workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+          script: |
+            ansible-playbook playbook.yml -i ../../inventories/stage -e "@../../group_vars/stage.yml" -e "ADO_PAT=$ADO_PAT" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN"
+          failOnStderr: false
+        env:
+          ADO_PAT: $(ADO_PAT)
+          DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+
+- ${{ if eq(parameters.deploy_prod, 'yes') }}:
+  - stage: Deploy_Prod
+    ${{ if eq(parameters.deploy_stage, 'yes') }}:
+      dependsOn: Deploy_Stage
+    ${{ elseif eq(parameters.deploy_test, 'yes') }}:
+      dependsOn: Deploy_Test
+    ${{ elseif eq(parameters.deploy_dev, 'yes') }}:
+      dependsOn: Deploy_Dev
+    ${{ else }}:
+      dependsOn: Dev_Validation
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+    pool:
+      name: ADA-ECS-PROD
+
+    jobs:
+    - job: DeployProd
+      displayName: Ansible Real-time Execution
+
+      steps:
+      - checkout: self
+
+      - ${{ if contains(parameters.playbook_folder, 'ado_agent_servers') }}:
+        - template: templates/task_download_private_key.yaml
+
+      # PROD Deployment
+      - task: Bash@3
+        displayName: Prod Deployment
+        inputs:
+          targetType: 'inline'
+          workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+          script: |
+            ansible-playbook playbook.yml -i ../../inventories/prod -e "@../../group_vars/prod.yml" -e "ADO_PAT=$ADO_PAT" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN"
+          failOnStderr: false
+        env:
+          ADO_PAT: $(ADO_PAT)
+          DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+
+

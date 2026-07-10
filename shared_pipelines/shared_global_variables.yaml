@@ -1,0 +1,6 @@
+variables:
+  ADADEVBUILDPOOL: ADA-ECS-DEV-Container-Agents
+  WSSTGBUILDPOOL: WS-ECS-STAGE-Container-Agents
+  ADADEVTESTINGPOOL: ADA-ECS-DEV-Container-Testing-Agents
+  WSSTGTESTINGPOOL: WS-ECS-STG-Container-Testing-Agents
+  ADAPRDTESTINGPOOL: ADA-ECS-PROD-Container-Testing-Agents

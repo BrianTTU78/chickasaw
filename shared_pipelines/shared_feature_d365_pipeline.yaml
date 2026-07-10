@@ -1,0 +1,185 @@
+parameters:
+  - name: app_name
+    type: string
+  - name: app_type
+    type: string
+  - name: app_location
+    type: string
+  - name: docker_folder
+    type: string
+
+stages:
+- stage: DockerBuildStage
+  displayName: 'Docker Build'
+
+  variables:
+    - template: shared_global_variables.yaml
+    - group: cn_pipelines_common
+    - group: ${{ parameters.app_name }}_dev
+
+  jobs:
+  - job: PrepJob
+    displayName: Pipeline Prep
+
+    pool:
+      name: $(ADADEVBUILDPOOL)
+
+    workspace:
+      clean: all
+
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: true
+    
+    - checkout: shared_pipelines
+      clean: true
+
+    - task: Bash@3
+      displayName: Find Latest Tag
+      name: FindGitTag
+      inputs:
+        targetType: 'filePath'
+        filePath: '$(Build.SourcesDirectory)/cn_ecs_shared_pipelines/scripts/manage_git_tags.sh'
+        workingDirectory: "$(Build.SourcesDirectory)/$(Build.Repository.Name)"
+        arguments: 'FIND "$(APP_VERSION)"'
+      env:
+        APP_VERSION: $(APP_VERSION)
+        DEBUG: $(DEBUG)
+
+  - job: DockerBuildJob
+    dependsOn: PrepJob
+    displayName: Docker Build
+
+    pool:
+      name: $(ADADEVBUILDPOOL)
+
+    variables:
+    - group: ${{ parameters.app_name }}_dev
+    - group: cn_pipelines_argocd_dev
+    - name: GIT_TAG
+      value: $[ dependencies.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+ 
+    steps:
+    - checkout: self
+      fetchDepth: 0
+      clean: true
+      persistCredentials: true
+
+    - checkout: shared_pipelines
+      clean: true
+
+    # Copy Cert
+    - task: Bash@3
+      displayName: Move Root CA Cert
+      inputs:
+        workingDirectory: $(Build.SourcesDirectory)/cn-ecs-d365-integration/
+        targetType: 'inline'
+        script: |
+          cp $(Build.SourcesDirectory)/cn-ecs-d365-integration/certs/chickasaw-root-ca.crt .
+          ls -lart
+  
+    # Build Docker Image
+    - task: Bash@3
+      name: DockerBuildJob
+      displayName: Build Image
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/cn-ecs-d365-integration"
+        script: |
+          IMAGE_NAME="${{ parameters.app_name }}:${GIT_TAG}"
+          DOCKERFILE_PATH="${{ parameters.docker_folder }}/dockerfile"
+          docker build --no-cache --tag "${IMAGE_NAME}" --file "${DOCKERFILE_PATH}" .
+          FILE_IMAGE_NAME="${IMAGE_NAME//:/-}"
+          docker save "${IMAGE_NAME}" -o "$(Build.ArtifactStagingDirectory)/${FILE_IMAGE_NAME}.tar"
+
+    - task: Bash@3
+      displayName: Tag GIT Repo
+      name: SetGitTag
+      inputs:
+        targetType: 'filePath'
+        filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/manage_git_tags.sh'
+        workingDirectory: "$(Build.SourcesDirectory)/$(Build.Repository.Name)"
+        arguments: 'CREATE ${APP_VERSION} ${GIT_TAG}'
+      env:
+        APP_NAME: ${{ parameters.app_name }}
+        APP_VERSION: $(APP_VERSION)
+        GIT_TAG: $(GIT_TAG)
+        DEBUG: $(DEBUG)
+
+    - task: PublishBuildArtifacts@1
+      displayName: Publish Artifacts
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'docker-image'
+        publishLocation: 'Container'
+
+- stage: DeployDev
+  displayName: 'Deploy Dev'
+  dependsOn:
+    - DockerBuildStage
+   
+  variables:
+  - template: shared_global_variables.yaml
+  - group: cn_pipelines_common
+  - group: ${{ parameters.app_name }}_dev
+  - group: cn_pipelines_argocd_dev
+  - name: GIT_TAG
+    value: $[ stageDependencies.DockerBuildStage.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+
+  pool:
+    name: $(ADADEVBUILDPOOL)
+
+  jobs:
+  - job: DockerDeployJob
+    displayName: Docker Deploy
+
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: true
+    
+    - checkout: shared_pipelines
+      clean: true
+
+    - checkout: helm_charts
+      clean: true
+      persistCredentials: true
+
+    - template: templates/task_download_docker_artifact.yaml
+
+    - task: Bash@3
+      displayName: Copy Artifacts
+      name: CopyArtifacts
+      inputs:
+        targetType: 'filePath'
+        filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/copy_artifacts.sh'
+        workingDirectory: "$(Pipeline.Workspace)/docker-image/"
+        arguments: 'DEV ${APP_NAME} ${GIT_TAG}'
+      env:
+        APP_NAME: ${{ parameters.app_name }}
+        GIT_TAG: $(GIT_TAG)
+        DEBUG: $(DEBUG)
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: dev_kubeconfig.yaml
+
+    # UPDATE SECRETS
+    - template: templates/task_update_k8s_secrets.yaml
+      parameters:
+        app_name: ${{ parameters.app_name }} 
+    
+    # UPDATE HELM CHART
+    - template: templates/task_update_helm_chart.yaml
+      parameters:
+        env: DEV
+        app_name: ${{ parameters.app_name }}
+
+    # SYNC ARGOCD
+    - template: templates/task_sync_argocd.yaml
+      parameters:
+        env: DEV
+        app_name: ${{ parameters.app_name }}

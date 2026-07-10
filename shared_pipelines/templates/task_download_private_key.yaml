@@ -1,0 +1,16 @@
+# DOWNLOAD SSH PRIVATE KEY SECRET
+steps:
+- task: DownloadSecureFile@1
+  name: deployKey
+  inputs:
+    secureFile: 'ado_prod_master_key'
+
+# COPY PRIVATE KEY TO FINAL LOCATION
+- task: Bash@3
+  displayName: Copy Private Key
+  inputs:
+    targetType: 'inline'
+    script: |
+      cp $(deployKey.secureFilePath) /data01/docker/ssh/ado_prod_master_key
+      sudo chown root:docker /data01/docker/ssh/ado_prod_master_key
+      sudo chmod 640 /data01/docker/ssh/ado_prod_master_key

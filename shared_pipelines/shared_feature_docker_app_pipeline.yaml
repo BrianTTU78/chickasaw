@@ -1,0 +1,134 @@
+parameters:
+  - name: app_name
+    type: string
+  - name: app_type
+    type: string
+  - name: docker_folder
+    type: string
+
+stages:
+- stage: DockerBuildStage
+  displayName: 'Docker Validate & Build'
+
+  variables:
+    - group: cn_pipelines_common
+    - group: ${{ parameters.app_name }}_dev
+    - template: shared_global_variables.yaml
+
+  jobs:  
+  - job: PrepJob
+    displayName: Pipeline Prep
+
+    pool:
+      name: $(ADADEVBUILDPOOL)
+    
+    workspace:
+      clean: all
+   
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: true
+    
+    - checkout: shared_pipelines
+      clean: true
+
+    - task: Bash@3
+      displayName: Find Latest Tag
+      name: FindGitTag
+      inputs:
+        targetType: 'filePath'
+        filePath: '$(Build.SourcesDirectory)/cn_ecs_shared_pipelines/scripts/manage_git_tags.sh'
+        workingDirectory: "$(Build.SourcesDirectory)/$(Build.Repository.Name)"
+        arguments: 'FIND "$(APP_VERSION)"'
+      env:
+        APP_VERSION: $(APP_VERSION)
+        DEBUG: $(DEBUG)
+
+  # CODE VALIDATION JOB
+  - ${{ if eq(parameters.app_type, 'dotnet') }}:
+    - template: templates/job_dotnet_code_validation.yaml
+      parameters:
+        app_name: ${{ parameters.app_name }}
+        docker_folder: ${{ parameters.docker_folder }}
+
+  - ${{ if eq(parameters.app_type, 'web') }}:
+    - template: templates/job_web_code_validation.yaml
+      parameters:
+        app_name: ${{ parameters.app_name }}
+        docker_folder: ${{ parameters.docker_folder }}
+  
+  # BUILD JOB
+  - template: templates/job_dotnet_docker_build.yaml
+    parameters:
+      app_name: ${{ parameters.app_name }}
+      docker_folder: ${{ parameters.docker_folder }}
+  
+- stage: DeployDev
+  displayName: 'Deploy DEV'
+  dependsOn:
+    - DockerBuildStage
+   
+  variables:
+  - template: shared_global_variables.yaml
+  - group: ${{ parameters.app_name }}_dev
+  - group: cn_pipelines_argocd_dev
+  - name: GIT_TAG
+    value: $[ stageDependencies.DockerBuildStage.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+
+  pool:
+    name: $(ADADEVBUILDPOOL)
+
+  jobs:
+  - job: DockerDeployJob
+    displayName: Docker Deploy
+
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: true
+    
+    - checkout: shared_pipelines
+      clean: true
+
+    - checkout: helm_charts
+      clean: true
+      persistCredentials: true
+
+    - template: templates/task_download_docker_artifact.yaml
+
+    - task: Bash@3
+      displayName: Copy Artifacts
+      name: CopyArtifacts
+      inputs:
+        targetType: 'filePath'
+        filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/copy_artifacts.sh'
+        workingDirectory: "$(Pipeline.Workspace)/docker-image/"
+        arguments: 'DEV ${APP_NAME} ${GIT_TAG}'
+      env:
+        APP_NAME: ${{ parameters.app_name }}
+        GIT_TAG: $(GIT_TAG)
+        DEBUG: $(DEBUG)
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: dev_kubeconfig.yaml
+
+    # CREATE SECRETS
+    - template: templates/task_update_k8s_secrets.yaml
+      parameters:
+        app_name: ${{ parameters.app_name }} 
+
+    # UPDATE HELM CHART
+    - template: templates/task_update_helm_chart.yaml
+      parameters:
+        env: DEV
+        app_name: ${{ parameters.app_name }}
+
+    # SYNC ARGOCD
+    - template: templates/task_sync_argocd.yaml
+      parameters:
+        env: DEV
+        app_name: ${{ parameters.app_name }}           

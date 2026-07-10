@@ -1,0 +1,8 @@
+steps:
+- task: DownloadBuildArtifacts@0
+  displayName: Download docker-image artifact
+  inputs:
+    buildType: current
+    downloadType: single
+    artifactName: docker-image
+    downloadPath: '$(Pipeline.Workspace)'

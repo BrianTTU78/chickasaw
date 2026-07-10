@@ -1,0 +1,21 @@
+parameters:
+- name: env
+  type: string
+
+- name: app_name
+  type: string
+
+steps:
+- task: Bash@3
+  displayName: Update Helm Chart
+  name: UpdateHelmChart
+  inputs:
+    targetType: 'filePath'
+    filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/update_app_version.sh'
+    workingDirectory: "$(Build.SourcesDirectory)/cn_ecs_helm_charts/helm_charts/"
+    arguments: '${ENV} ${APP_NAME} ${GIT_TAG}'
+  env:
+    ENV: ${{ parameters.env }}
+    APP_NAME: ${{ parameters.app_name }}
+    GIT_TAG: $(GIT_TAG)
+    DEBUG: $(DEBUG)

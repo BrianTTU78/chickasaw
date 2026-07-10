@@ -1,0 +1,44 @@
+parameters:
+  name: app_name
+  type: string
+
+jobs:
+- job: GitTagJob
+  dependsOn: 
+    - PrepJob
+    - DockerBuildJob
+  displayName: Git Tag
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  pool:
+    name: $(ADADEVBUILDPOOL)
+
+  workspace:
+    clean: all
+  variables:
+  - template: ../shared_global_variables.yaml
+  - group: ${{ parameters.app_name }}_dev
+  - group: cn_pipelines_argocd_dev
+  - name: GIT_TAG
+    value: $[ dependencies.PrepJob.outputs['FindGitTag.GIT_TAG'] ]
+ 
+  steps:
+  - checkout: self
+    clean: true
+    persistCredentials: true
+  
+  - checkout: shared_pipelines
+    clean: true
+  - task: Bash@3
+    displayName: Tag GIT Repo
+    name: SetGitTag
+    inputs:
+      targetType: 'filePath'
+      filePath: '$(Pipeline.Workspace)/s/cn_ecs_shared_pipelines/scripts/manage_git_tags.sh'
+      workingDirectory: "$(Build.SourcesDirectory)/$(Build.Repository.Name)"
+      arguments: 'CREATE ${APP_VERSION} ${GIT_TAG}'
+    env:
+      APP_NAME: ${{ parameters.app_name }}
+      APP_VERSION: $(APP_VERSION)
+      GIT_TAG: $(GIT_TAG)
+      DEBUG: $(DEBUG)
