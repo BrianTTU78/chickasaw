@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cn-ecs-d365-submission-api
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: ssh://azdevops.int.chickasaw.net:22/Tribal%20Services/Enhanced%20Citizen%20Services/_git/cn_ecs_helm_charts
+    targetRevision: main
+    path: helm_charts/cn-ecs-d365-submission-api
+    helm:
+      valueFiles:
+        - dev-values.yaml
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cn-ecs-d365-submission-api
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

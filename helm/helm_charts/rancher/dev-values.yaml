@@ -1,0 +1,10 @@
+rancher:
+  hostname: dev-ecs-rancher.int.chickasaw.net
+  tls: external
+  replicas: 1
+  privateCA: true
+  additionalTrustedCAs: true
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi

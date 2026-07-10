@@ -1,0 +1,4 @@
+# Base values for pipeline validation; environment files provide concrete settings.
+createSecret: false
+env: {}
+secrets: {}

@@ -1,0 +1,31 @@
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger:
+  branches:
+    include:
+      - main
+      - bug/*
+
+  paths:
+    include:
+      - helm_charts/metrics-server/*
+ 
+variables:
+  - group: cn_pipelines_common
+
+resources:
+  repositories:
+    - repository: shared_pipelines
+      type: git
+      name: cn_ecs_shared_pipelines
+
+    - repository: helm_charts
+      type: git
+      name: cn_ecs_helm_charts
+ 
+extends:
+  template: shared_main_argocd_pipeline.yaml@shared_pipelines
+  parameters:
+    app_name: metrics-server
+    app_type: kubernetes
+    app_location: all

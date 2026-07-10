@@ -1,0 +1,507 @@
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger:
+  branches:
+    include:
+      - main
+      - feature/*
+      - bug/*
+
+  paths:
+    include:
+      - helm_charts/dynatrace/*
+ 
+variables:
+  - group: cn_pipelines_common
+  - group: cn_pipelines_dynatrace_common
+ 
+stages:
+- stage: Dev_Validation
+
+  pool:
+    name: ADA-ECS-DEV-Container-Agents
+
+  jobs:
+  - job: HelmFeatureJob
+    displayName: Helm Feature Execution Testing
+    condition: or(startswith(variables['Build.SourceBranch'], 'refs/heads/feature/'), startswith(variables['Build.SourceBranch'], 'refs/heads/bug/'), eq(variables['Build.Reason'], 'PullRequest'))
+
+    steps:
+    - checkout: self
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: dev_kubeconfig.yaml
+
+    # Validate Helm
+    - task: Bash@3
+      displayName: Validate Helm
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/helm_charts/dynatrace"
+        script: |
+          echo "#### HELM DEPENDENCY UPDATE ####"
+          helm dependency update
+
+          echo "#### HELM LINT ####"
+          helm lint . -f values.yaml -f dev-values.yaml
+
+          echo "#### TEMPLATE RENDER TEST ####"
+          helm template dynatrace . -n dynatrace -f values.yaml -f dev-values.yaml
+
+          echo "#### OPTIONAL CLUSTER CHECKS ####"
+          kubectl get namespace dynatrace || true
+          kubectl get crd dynakubes.dynatrace.com || true
+          kubectl -n dynatrace get secret dynakube || true
+
+          echo "#### DRY RUN AGAINST CLUSTER ####"
+          helm upgrade --install dynatrace . -n dynatrace -f values.yaml -f dev-values.yaml --dry-run --debug
+        failOnStderr: false
+
+- stage: Dev_Deploy
+  dependsOn: Dev_Validation
+  condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), startsWith(variables['Build.SourceBranch'], 'refs/heads/bug/')))
+
+  pool:
+    name: ADA-ECS-DEV-Container-Agents
+
+  jobs:
+  - job: HelmDeployDev
+    displayName: Helm Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: dev_kubeconfig.yaml
+
+    # Create Dynatrace Secret
+    - task: Bash@3
+      displayName: Create Dynatrace Secret
+      inputs:
+        targetType: 'inline'
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+          
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # CREATE / UPDATE DYNATRACE TOKEN SECRET
+          kubectl -n dynatrace create secret generic dev-dynakube \
+            --from-literal="apiToken=$(DEV_DYNATRACE_OPERATOR_TOKEN)" \
+            --from-literal="dataIngestToken=$(DEV_DYNATRACE_INGEST_TOKEN)" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # VERIFY SECRET EXISTS
+          kubectl -n dynatrace get secret dev-dynakube
+    
+    # Deploy DynaKube through Argo CD
+    - task: Bash@3
+      displayName: Dev Dynatrace Argo CD Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)"
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # APPLY ARGO CD APP: DYNATRACE
+          kubectl apply -f applications/dev/dynatrace.yaml
+
+          # WAIT FOR DYNAKUBE RESOURCE
+          for i in {1..30}; do
+            if kubectl get dynakube -n dynatrace >/dev/null 2>&1; then
+              echo "DynaKube resource found"
+              kubectl get dynakube -n dynatrace
+              exit 0
+            fi
+
+            echo "Waiting for DynaKube resource to be created by Argo CD..."
+            sleep 10
+          done
+
+          echo "DynaKube resource was not found after waiting"
+          kubectl get applications -n argocd
+          kubectl get pods -n dynatrace
+          exit 1
+
+- stage: Test_Deploy
+  dependsOn: Dev_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  pool:
+    name: ADA-ECS-DEV-Container-Agents
+
+  jobs:
+  - job: HelmDeployTest
+    displayName: Helm Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: test_kubeconfig.yaml
+
+   # Create Dynatrace Secret
+    - task: Bash@3
+      displayName: Create Dynatrace Secret
+      inputs:
+        targetType: 'inline'
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+          
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # CREATE / UPDATE DYNATRACE TOKEN SECRET
+          kubectl -n dynatrace create secret generic test-dynakube \
+            --from-literal="apiToken=$(TEST_DYNATRACE_OPERATOR_TOKEN)" \
+            --from-literal="dataIngestToken=$(TEST_DYNATRACE_INGEST_TOKEN)" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # VERIFY SECRET EXISTS
+          kubectl -n dynatrace get secret test-dynakube
+    
+    # Deploy DynaKube through Argo CD
+    - task: Bash@3
+      displayName: Test Dynatrace Argo CD Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)"
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # APPLY ARGO CD APP: DYNATRACE
+          kubectl apply -f applications/test/dynatrace.yaml
+
+          # WAIT FOR DYNAKUBE RESOURCE
+          for i in {1..30}; do
+            if kubectl get dynakube -n dynatrace >/dev/null 2>&1; then
+              echo "DynaKube resource found"
+              kubectl get dynakube -n dynatrace
+              exit 0
+            fi
+
+            echo "Waiting for DynaKube resource to be created by Argo CD..."
+            sleep 10
+          done
+
+          echo "DynaKube resource was not found after waiting"
+          kubectl get applications -n argocd
+          kubectl get pods -n dynatrace
+          exit 1
+
+- stage: Stage_INT_Deploy
+  dependsOn: Test_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  pool:
+    name: WS-ECS-STAGE-Container-Agents
+
+  jobs:
+  - job: HelmDeployStage
+    displayName: Helm Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: stage_int_kubeconfig.yaml
+
+   # Create Dynatrace Secret
+    - task: Bash@3
+      displayName: Create Dynatrace Secret
+      inputs:
+        targetType: 'inline'
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+          
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # CREATE / UPDATE DYNATRACE TOKEN SECRET
+          kubectl -n dynatrace create secret generic stage-int-dynakube \
+            --from-literal="apiToken=$(STAGE_INT_DYNATRACE_OPERATOR_TOKEN)" \
+            --from-literal="dataIngestToken=$(STAGE_INT_DYNATRACE_INGEST_TOKEN)" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # VERIFY SECRET EXISTS
+          kubectl -n dynatrace get secret stage-int-dynakube
+    
+    # Deploy DynaKube through Argo CD
+    - task: Bash@3
+      displayName: Stage Dynatrace Argo CD Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)"
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # APPLY ARGO CD APP: DYNATRACE
+          kubectl apply -f applications/stage-int/dynatrace.yaml
+
+          # WAIT FOR DYNAKUBE RESOURCE
+          for i in {1..30}; do
+            if kubectl get dynakube -n dynatrace >/dev/null 2>&1; then
+              echo "DynaKube resource found"
+              kubectl get dynakube -n dynatrace
+              exit 0
+            fi
+
+            echo "Waiting for DynaKube resource to be created by Argo CD..."
+            sleep 10
+          done
+
+          echo "DynaKube resource was not found after waiting"
+          kubectl get applications -n argocd
+          kubectl get pods -n dynatrace
+          exit 1
+
+
+- stage: Stage_EXT_Deploy
+  dependsOn: Test_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  pool:
+    name: WS-ECS-STAGE-Container-Agents
+
+  jobs:
+  - job: HelmDeployStage
+    displayName: Helm Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: stage_ext_kubeconfig.yaml
+
+   # Create Dynatrace Secret
+    - task: Bash@3
+      displayName: Create Dynatrace Secret
+      inputs:
+        targetType: 'inline'
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+          
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # CREATE / UPDATE DYNATRACE TOKEN SECRET
+          kubectl -n dynatrace create secret generic stage-ext-dynakube \
+            --from-literal="apiToken=$(STAGE_EXT_DYNATRACE_OPERATOR_TOKEN)" \
+            --from-literal="dataIngestToken=$(STAGE_EXT_DYNATRACE_INGEST_TOKEN)" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # VERIFY SECRET EXISTS
+          kubectl -n dynatrace get secret stage-ext-dynakube
+    
+    # Deploy DynaKube through Argo CD
+    - task: Bash@3
+      displayName: Stage Dynatrace Argo CD Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)"
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # APPLY ARGO CD APP: DYNATRACE
+          kubectl apply -f applications/stage-ext/dynatrace.yaml
+
+          # WAIT FOR DYNAKUBE RESOURCE
+          for i in {1..30}; do
+            if kubectl get dynakube -n dynatrace >/dev/null 2>&1; then
+              echo "DynaKube resource found"
+              kubectl get dynakube -n dynatrace
+              exit 0
+            fi
+
+            echo "Waiting for DynaKube resource to be created by Argo CD..."
+            sleep 10
+          done
+
+          echo "DynaKube resource was not found after waiting"
+          kubectl get applications -n argocd
+          kubectl get pods -n dynatrace
+          exit 1
+
+- stage: Prod_INT_Deploy
+  dependsOn: Stage_INT_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  pool:
+    name: ADA-ECS-PROD-Container-Agents
+
+  jobs:
+  - job: HelmDeployStage
+    displayName: Helm Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: prod_int_kubeconfig.yaml
+
+   # Create Dynatrace Secret
+    - task: Bash@3
+      displayName: Create Dynatrace Secret
+      inputs:
+        targetType: 'inline'
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+          
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # CREATE / UPDATE DYNATRACE TOKEN SECRET
+          kubectl -n dynatrace create secret generic prod-int-dynakube \
+            --from-literal="apiToken=$(PROD_DYNATRACE_OPERATOR_TOKEN)" \
+            --from-literal="dataIngestToken=$(PROD_DYNATRACE_INGEST_TOKEN)" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # VERIFY SECRET EXISTS
+          kubectl -n dynatrace get secret prod-int-dynakube
+    
+    # Deploy DynaKube through Argo CD
+    - task: Bash@3
+      displayName: Prod Dynatrace Argo CD Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)"
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # APPLY ARGO CD APP: DYNATRACE
+          kubectl apply -f applications/prod-int/dynatrace.yaml
+
+          # WAIT FOR DYNAKUBE RESOURCE
+          for i in {1..30}; do
+            if kubectl get dynakube -n dynatrace >/dev/null 2>&1; then
+              echo "DynaKube resource found"
+              kubectl get dynakube -n dynatrace
+              exit 0
+            fi
+
+            echo "Waiting for DynaKube resource to be created by Argo CD..."
+            sleep 10
+          done
+
+          echo "DynaKube resource was not found after waiting"
+          kubectl get applications -n argocd
+          kubectl get pods -n dynatrace
+          exit 1
+
+
+- stage: Prod_EXT_Deploy
+  dependsOn: Stage_EXT_Deploy
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  pool:
+    name: ADA-ECS-PROD-Container-Agents
+
+  jobs:
+  - job: HelmDeployStage
+    displayName: Helm Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # Download Kubeconfig
+    - task: DownloadSecureFile@1
+      name: kubeconfig
+      inputs:
+        secureFile: prod_ext_kubeconfig.yaml
+
+   # Create Dynatrace Secret
+    - task: Bash@3
+      displayName: Create Dynatrace Secret
+      inputs:
+        targetType: 'inline'
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+          
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # CREATE / UPDATE DYNATRACE TOKEN SECRET
+          kubectl -n dynatrace create secret generic prod-ext-dynakube \
+            --from-literal="apiToken=$(PROD_EXT_DYNATRACE_OPERATOR_TOKEN)" \
+            --from-literal="dataIngestToken=$(PROD_EXT_DYNATRACE_INGEST_TOKEN)" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # VERIFY SECRET EXISTS
+          kubectl -n dynatrace get secret prod-ext-dynakube
+    
+    # Deploy DynaKube through Argo CD
+    - task: Bash@3
+      displayName: Stage Dynatrace Argo CD Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)"
+        script: |
+          export KUBECONFIG="$(kubeconfig.secureFilePath)"
+          chmod 600 "$KUBECONFIG"
+
+          # CREATE DYNATRACE NAMESPACE
+          kubectl create namespace dynatrace --dry-run=client -o yaml | kubectl apply -f -
+
+          # APPLY ARGO CD APP: DYNATRACE
+          kubectl apply -f applications/prod-ext/dynatrace.yaml
+
+          # WAIT FOR DYNAKUBE RESOURCE
+          for i in {1..30}; do
+            if kubectl get dynakube -n dynatrace >/dev/null 2>&1; then
+              echo "DynaKube resource found"
+              kubectl get dynakube -n dynatrace
+              exit 0
+            fi
+
+            echo "Waiting for DynaKube resource to be created by Argo CD..."
+            sleep 10
+          done
+
+          echo "DynaKube resource was not found after waiting"
+          kubectl get applications -n argocd
+          kubectl get pods -n dynatrace
+          exit 1

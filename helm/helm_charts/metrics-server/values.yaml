@@ -1,0 +1,4 @@
+# helm_charts/metrics-server/values.yaml
+metrics-server:
+  args:
+    - --kubelet-insecure-tls

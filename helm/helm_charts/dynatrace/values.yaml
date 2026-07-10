@@ -1,0 +1,34 @@
+oneAgent:
+  containerRuntimeSocket: "/run/containerd/containerd.sock"
+
+  args:
+    - --set-host-tag=dt.cost.costcenter=enterprise-applications
+    - --set-host-tag=dt.cost.product=enterprise-apps-products
+
+activeGate:
+  replicas: 1
+  storageClassName: local-path
+  storageSize: 1Gi
+  capabilities:
+    - routing
+    - debugging
+    - kubernetes-monitoring
+  resources:
+    requests:
+      cpu: 250m
+      memory: 2Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+otelCollector:
+  repository: public.ecr.aws/dynatrace/dynatrace-otel-collector
+  tag: latest
+
+telemetryIngest:
+  protocols:
+    - jaeger
+    - otlp
+    - statsd
+    - zipkin
+  serviceName: telemetry-ingest

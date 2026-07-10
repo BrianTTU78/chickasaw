@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "formio.fullname" . }}
+  labels:
+    {{- include "formio.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: formio-app
+  ports:
+    - name: http
+      port: {{ .Values.formio.port }}
+      targetPort: {{ .Values.formio.port }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "formio.fullname" . }}-pdf
+  labels:
+    {{- include "formio.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: pdf
+  ports:
+    - name: http
+      port: {{ .Values.pdf.port }}
+      targetPort: {{ .Values.pdf.port }}

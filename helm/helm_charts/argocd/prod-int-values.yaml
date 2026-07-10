@@ -1,0 +1,42 @@
+argo-cd:
+  configs:
+    params:
+      "server.insecure": "true"
+
+    cm:
+      accounts.ado_pipelines: apiKey
+      accounts.ado_pipelines.enabled: "true"
+      oidc.tls.insecure.skip.verify: "true"
+      url: https://prod-ecs-int-argocd.int.chickasaw.net
+      oidc.config: |
+        name: SSO
+        issuer: https://login.microsoftonline.com/f29a0ed1-9753-4fea-85e9-df336a63c5d8/v2.0
+        clientID: 1320ec1c-1173-4b46-b8b4-a8e7aa1d2c8d
+        clientSecret: $oidc.clientSecret
+        requestedScopes: ["openid", "profile", "email"]
+
+    rbac:
+      policy.default: role:readonly
+      scopes: '[groups, email]'
+      policy.csv: |
+        p, role:pipeline-sync, applications, get, */*, allow
+        p, role:pipeline-sync, applications, sync, */*, allow
+        p, role:developer, logs, get, */*, allow
+        
+        g, 8eb32278-ff77-4ea2-a1e3-23ff46e1c2dd, role:admin
+        g, Brian.Dickey@chickasaw.net, role:admin
+        g, George.Gavula@chickasaw.net, role:admin
+        g, Charles.Webb@chickasaw.net, role:admin
+        g, Stephanie.Marcoli@chickasaw.net, role:readonly
+        g, ado_pipelines, role:pipeline-sync
+
+  server:
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      hostname: prod-ecs-int-argocd.int.chickasaw.net
+      path: /
+      pathType: Prefix
+      annotations:
+        nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+        nginx.ingress.kubernetes.io/ssl-redirect: "false"

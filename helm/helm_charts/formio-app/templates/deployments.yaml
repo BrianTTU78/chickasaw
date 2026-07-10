@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "formio.fullname" . }}
+  labels:
+    {{- include "formio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: formio-app
+spec:
+  replicas: {{ .Values.formio.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: formio-app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: formio-app
+    spec:
+      containers:
+        - name: formio
+          image: "{{ .Values.formio.image.repository }}:{{ .Values.formio.image.tag }}"
+          imagePullPolicy: {{ .Values.formio.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.formio.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "formio.fullname" . }}-config
+            - secretRef:
+                name: {{ include "formio.fullname" . }}-secrets
+          env:
+            - name: PORT
+              value: {{ .Values.formio.port | quote }}            
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "formio.fullname" . }}-pdf
+  labels:
+    {{- include "formio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pdf
+spec:
+  replicas: {{ .Values.pdf.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: pdf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: pdf
+    spec:
+      containers:
+        - name: pdf-server
+          image: "{{ .Values.pdf.image.repository }}:{{ .Values.pdf.image.tag }}"
+          imagePullPolicy: {{ .Values.pdf.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.pdf.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "formio.fullname" . }}-config
+            - secretRef:
+                name: {{ include "formio.fullname" . }}-secrets
+          env:
+            - name: FORMIO_PDF_PORT
+              value: {{ .Values.pdf.port | quote }}

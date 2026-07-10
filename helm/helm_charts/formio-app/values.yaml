@@ -1,0 +1,17 @@
+formio:
+  image:
+    repository: formio/formio-enterprise
+    tag: latest
+
+pdf:
+  image:
+    repository: formio/pdf-server
+    tag: latest
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: false
+  className: nginx
+  path: /

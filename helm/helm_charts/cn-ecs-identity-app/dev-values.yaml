@@ -1,0 +1,48 @@
+replicaCount: 1
+image:
+  repository: cn-ecs-identity-app
+  tag: "1.0.51"
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+ingress:
+  enabled: true
+  className: nginx
+  host: dev-ecs-myaccount.int.chickasaw.net
+  path: /
+  pathType: Prefix
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  tls:
+    enabled: false
+    secretName: ""
+# IMPORTANT:
+# Argo/Helm will NOT create/update the Kubernetes Secret.
+# Azure DevOps pipeline owns the secret values.
+createSecret: false
+env:
+  "Twilio_FromNumber": "+18886447258"
+  "SendGrid_From_Name": "Chickasaw Nation Do Not Reply"
+  "SendGrid_From_Email": "noreply@notify.chickasaw.net"
+  "InitialAdmin_Username": "admin"
+  "InitialAdmin_Email": "admin@chickasaw.net"
+  "Database_Server": "ADAVDEVSQL04.int.chickasaw.net"
+  "Database_Name": "EcsIdentity"
+  "Database_User": "EcsIdentity_dev_svc"
+  "Database_RunMigrationsOnStartup": "false"
+  "Twilio_StatusCallback": ""
+  "Twilio_StatusCallbackUrl": ""
+  "Cors_SpaOrigins": "*"
+# Keep keys documented here ONLY for reference.
+# Values come from the Azure DevOps pipeline secret creation task.
+secrets:
+  "Twilio_AccountSid": ""
+  "Twilio_VerifyServiceSid": ""
+  "Twilio_AuthToken": ""
+  "SendGrid_ApiKey": ""
+  "SendGrid_WebhookKey": ""
+  "InitialAdmin_Password": ""
+  "Database_Password": ""

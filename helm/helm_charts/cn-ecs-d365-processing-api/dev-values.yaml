@@ -1,0 +1,30 @@
+replicaCount: 1
+image:
+  repository: cn-ecs-d365-processing-api
+  tag: "1.0.6"
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8083
+ingress:
+  enabled: true
+  className: nginx
+  host: dev-ecs-d365proc.int.chickasaw.net
+  path: /
+  pathType: Prefix
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  tls:
+    enabled: false
+    secretName: ""
+createSecret: false
+env:
+  D365__BaseUrl: "https://dev-myecs.int.chickasaw.net/DEVECS"
+  D365__ApiVersion: "9.1"
+  D365__UseDefaultCredentials: "false"
+  D365__Domain: "INT"
+  D365__Username: "DYN_API_PROC_DEV"
+  DataPlatformEvents__Enabled: "true"
+  ASPNETCORE_URLS: "http://+:8083"

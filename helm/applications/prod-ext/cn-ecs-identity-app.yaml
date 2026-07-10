@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cn-ecs-identity-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: ssh://azdevops.int.chickasaw.net:22/Tribal%20Services/Enhanced%20Citizen%20Services/_git/cn_ecs_helm_charts
+    targetRevision: main
+    path: helm_charts/cn-ecs-identity-app
+    helm:
+      valueFiles:
+        - prod-ext-values.yaml
+        - values.yaml
+        
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cn-ecs-identity-app
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

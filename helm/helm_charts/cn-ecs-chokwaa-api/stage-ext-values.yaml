@@ -1,0 +1,85 @@
+replicaCount: 1
+image:
+  repository: cn-ecs-chokwaa-api
+  tag: "1.0.22"
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+ingress:
+  enabled: true
+  className: nginx
+  host: stage-ecs-chokwaaapi.int.chickasaw.net
+  path: /
+  pathType: Prefix
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  tls:
+    enabled: false
+    secretName: ""
+createSecret: false
+env:
+  AllowedCorsOrigins: "*"
+  SecurityHeaders__FrameAncestors: ""
+  OpenIddict__Authority: "https://stage-ecs-myaccount.int.chickasaw.net/"
+  OpenApi__Document__Name: "v1"
+  OpenApi__Document__Title: "ECS Form BFF"
+  OpenApi__Document__Version: "1"
+  OpenApi__Security__OAuth2__SchemeName: "oauth2"
+  OpenApi__Security__OAuth2__AuthorizationEndpointPath: "connect/authorize"
+  OpenApi__Security__OAuth2__TokenEndpointPath: "connect/token"
+  OpenApi__Security__OAuth2__TokenEndpointOverride: "/swagger/oauth2-token-proxy"
+  OpenApi__Security__OAuth2__Scopes__openid: "Sign in"
+  OpenApi__Security__OAuth2__Scopes__profile: "Basic profile (name)"
+  OpenApi__Security__OAuth2__Scopes__email: "Email address"
+  OpenApi__Security__OAuth2__Scopes__roles: "Authorization groups"
+  OpenApi__Security__OAuth2__Scopes__offline_access: "Refresh token"
+  OpenApi__Security__OAuth2__Scopes__Profile.Read: "Read your Chokwaa profile"
+  OpenApi__Security__OAuth2__Scopes__Profile.Write: "Update your Chokwaa profile"
+  OpenApi__Security__OAuth2__Scopes__Services.Read: "Read services data"
+  OpenApi__Security__OAuth2__RequiredScopes__0: "openid"
+  OpenApi__Security__OAuth2__RequiredScopes__1: "profile"
+  OpenApi__Security__OAuth2__RequiredScopes__2: "email"
+  OpenApi__Security__OAuth2__RequiredScopes__3: "roles"
+  OpenApi__Security__OAuth2__RequiredScopes__4: "offline_access"
+  OpenApi__Security__OAuth2__RequiredScopes__5: "Profile.Read"
+  OpenApi__Security__OAuth2__RequiredScopes__6: "Profile.Write"
+  OpenApi__Security__OAuth2__RequiredScopes__7: "Services.Read"
+  OpenApi__Security__Bearer__SchemeName: "Bearer"
+  OpenApi__Security__Bearer__HeaderName: "Authorization"
+  OpenApi__Security__Bearer__HttpScheme: "bearer"
+  OpenApi__Security__Bearer__Format: "JWT"
+  OpenApi__SwaggerUi__OAuthClientId: "web-app-swagger"
+  OpenApi__SwaggerUi__OAuthScopeSeparator: " "
+  OpenApi__SwaggerUi__OAuthUsePkce: "true"
+  AddressServiceSettings__BaseUrl: "https://atlas.microsoft.com/search/fuzzy/json?api-version=1.0"
+  FormsSettings__BaseUrl: "https://dev-myforms.chickasaw.net"
+  FormsSettings__ProjectEmbedPath: "/dev-ecs"
+  FormsSettings__FormioCnTemplateUrl: "https://dev-myfiles.chickasaw.net/formio-cn-template/develop/latest/formio-cn-template.js"
+  FormsSettings__FormioCnWrapperUrl: "https://dev-myfiles.chickasaw.net/formio-cn-template/develop/latest/formio-cn-wrapper.js"
+  FormsSettings__LandingPageUrl: "https://chickasaw.net/Special-Pages/Chokwaa"
+  FormsSettings__NotFoundUrl: "https://chickasaw.net/Special-Pages/Chokwaa/404"
+  FormsSettings__DraftNotFoundUrl: "/SavedDraftNotFound"
+  DraftsS3Settings__Endpoint: "dev-myfiles.chickasaw.net"
+  DraftsS3Settings__Bucket: "formio-drafts-develop"
+  UploadsS3Settings__Endpoint: "dev-myfiles.chickasaw.net"
+  UploadsS3Settings__Bucket: "formio-file-upload-develop"
+  AuthSettings__IsSitePasswordRequired: "false"
+  DataProtection__UseMongoDb: "false"
+  DataProtection__MongoDbSettings__ConnectionString: ""
+  DataProtection__MongoDbSettings__DatabaseName: ""
+  DataProtection__MongoDbSettings__ApplicationName: ""
+  Cniq__Username: "9e957d13-c3f4-415f-8a99-f14707f257bd"
+  Cniq__Url: "https://cniqapi.mtctest.chickasaw.net"
+  Cniq__Scope: "api://b02a8df5-dd1c-40a0-872a-4c9deca1c7ff/.default"
+  Cniq__Authority: "https://login.microsoftonline.com/f29a0ed1-9753-4fea-85e9-df336a63c5d8/oauth2/v2.0/token"
+  DataPlatformSettings__DataPlatformUrl: "https://stage-ecs-data-platform.int.chickasaw.net"
+  DraftsS3Settings__AccessKey: ""
+  UploadsS3Settings__AccessKey: "formio-file-upload-develop-user"
+  Email__TemplateIds__ConfirmDraftSaved: "d-a21cf8d6752e4eb8bbb1dd4c68b7c3e8"
+  Email__TemplateIds__ConfirmProgramListRegistration: "d-5eea7c8b68e749a8a6f3c7c6905cb819"
+  Email__TemplateIds__ConfirmSingleProgramRegistration: "d-c1b6762f44a14f89a1c2c82b740b9a49"
+  Email__TemplateIds__DraftReminder: "d-c03646be86d2449c990278328fa04b4c"
+  Email__TemplateIds__HonorClubNominatorEmail: "d-fed0529cf7cb4ba28c4a9f9a61f515ca"

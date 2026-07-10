@@ -1,0 +1,8 @@
+apiUrl: "https://vnx45622.live.dynatrace.com/api"
+dynakube:
+  tokenSecretName: stage-dynakube
+  monitoringName: cnit-ecs-stage-internal
+  agentsName: cnit-ecs-stage-internal-agents
+
+activeGate:
+  replicas: 1

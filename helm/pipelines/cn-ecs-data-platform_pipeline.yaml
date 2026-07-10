@@ -1,0 +1,32 @@
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger:
+  branches:
+    include:
+      - main
+      - bug/*
+
+  paths:
+    include:
+      - helm_charts/cn-ecs-data-platform/*
+
+variables:
+  - group: cn_pipelines_common
+  - group: cn-ecs-data-platform_dev
+
+resources:
+  repositories:
+    - repository: shared_pipelines
+      type: git
+      name: cn_ecs_shared_pipelines
+
+    - repository: helm_charts
+      type: git
+      name: cn_ecs_helm_charts
+
+extends:
+  template: shared_main_argocd_pipeline.yaml@shared_pipelines
+  parameters:
+    app_name: cn-ecs-data-platform
+    app_type: dotnet
+    app_location: internal

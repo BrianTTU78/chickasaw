@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-ssh-known-hosts-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-ssh-known-hosts-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  ssh_known_hosts: |
+    azdevops.int.chickasaw.net ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+mCkfgTXw1QG2CsZQ5c/mc1RN7y21k/mpF/PU8jMHNyl+9oRF7vV+DQKArwwRG62YdHXhuxZsUYtSWHhV9dpKcpNL1SVCD/0s9DRcj8bCrqHEVDKH7QiUX6IeI11oie4TKCQmXnNnBs2QJI8cuFTzxdjO180YsCXiebcEDRRN8GkWLnsgckiOn73pbQX1ZBB2VFE2Y3Aa7bHWYFfNipzNDKlqmVkuvmHS/TuLib8wG7R06z1TbD6FZQYLlTiuPZMeUpe55E+w9etvHyngsZ7iQQpR/SabFHZxJV/Na0qtJXOgTpQkluPOGD8fhlUUwNOzlA+GkIe6QabPu+ns/tU3

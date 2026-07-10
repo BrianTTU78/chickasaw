@@ -1,0 +1,12 @@
+rancher:
+  hostname: prod-ecs-int-rancher.int.chickasaw.net
+  tls: external
+  privateCA: true
+  replicas: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-cn-ecs-helm-charts
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+type: Opaque
+stringData:
+  type: git
+  name: cn-ecs-helm-charts
+  project: default
+  url: ssh://azdevops.int.chickasaw.net:22/Tribal%20Services/Enhanced%20Citizen%20Services/_git/cn_ecs_helm_charts

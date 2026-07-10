@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pacman.fullname" . }}
+  namespace: pacman
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "pacman.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "pacman.name" . }}
+    spec:
+      containers:
+        - name: {{ include "pacman.name" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ .Values.containerPort }}

@@ -1,0 +1,57 @@
+apiVersion: dynatrace.com/v1beta6
+kind: DynaKube
+metadata:
+  name: {{ .Values.dynakube.agentsName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    dynatrace.com/created-by: "dynatrace.kubernetes"
+
+spec:
+  apiUrl: {{ .Values.apiUrl | quote }}
+  tokens: {{ .Values.dynakube.tokenSecretName | quote }}
+
+  oneAgent:
+    cloudNativeFullStack:
+{{- if .Values.oneAgent.args }}
+      args:
+{{- range .Values.oneAgent.args }}
+        - {{ . | quote }}
+{{- end }}
+{{- end }}
+      env:
+        - name: ONEAGENT_CONTAINER_RUNTIME_SOCKET
+          value: {{ .Values.oneAgent.containerRuntimeSocket | quote }}
+
+  activeGate:
+    capabilities:
+{{- range .Values.activeGate.capabilities }}
+      - {{ . | quote }}
+{{- end }}
+    resources:
+      requests:
+        cpu: {{ .Values.activeGate.resources.requests.cpu | quote }}
+        memory: {{ .Values.activeGate.resources.requests.memory | quote }}
+      limits:
+        cpu: {{ .Values.activeGate.resources.limits.cpu | quote }}
+        memory: {{ .Values.activeGate.resources.limits.memory | quote }}
+    replicas: {{ .Values.activeGate.replicas | default 1 }}
+    volumeClaimTemplate:
+      storageClassName: {{ .Values.activeGate.storageClassName | quote }}
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: {{ .Values.activeGate.storageSize | quote }}
+
+  templates:
+    otelCollector:
+      imageRef:
+        repository: {{ .Values.otelCollector.repository | quote }}
+        tag: {{ .Values.otelCollector.tag | quote }}
+
+  telemetryIngest:
+    protocols:
+{{- range .Values.telemetryIngest.protocols }}
+      - {{ . | quote }}
+{{- end }}
+    serviceName: {{ .Values.telemetryIngest.serviceName | quote }}

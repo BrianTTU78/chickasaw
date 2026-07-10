@@ -1,0 +1,7 @@
+# helm_charts/formio/Chart.yaml
+apiVersion: v2
+name: formio
+description: Helm chart for Form.io and PDF server
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

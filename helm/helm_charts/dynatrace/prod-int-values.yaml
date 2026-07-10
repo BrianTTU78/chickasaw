@@ -1,0 +1,8 @@
+apiUrl: "https://vnx45622.live.dynatrace.com/api"
+dynakube:
+  tokenSecretName: prod-int-dynakube
+  monitoringName: cnit-ecs-prod-internal
+  agentsName: cnit-ecs-prod-internal-agents
+
+activeGate:
+  replicas: 1

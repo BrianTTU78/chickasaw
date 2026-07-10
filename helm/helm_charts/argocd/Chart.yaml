@@ -1,0 +1,11 @@
+apiVersion: v2
+name: argocd-bootstrap
+description: Wrapper chart for Argo CD
+type: application
+version: 0.1.0
+icon: https://raw.githubusercontent.com/argoproj/argo-cd/master/docs/assets/logo.png
+
+dependencies:
+  - name: argo-cd
+    version: 9.4.x
+    repository: https://argoproj.github.io/argo-helm

@@ -1,0 +1,25 @@
+
+image:
+  repository: cn-ecs-chokwaa-app
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+
+ingress:
+  enabled: false
+  className: nginx
+  host: ""
+  path: /
+  pathType: Prefix
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  tls:
+    enabled: false
+    secretName: ""
+
+createSecret: false
+
+secrets: {}

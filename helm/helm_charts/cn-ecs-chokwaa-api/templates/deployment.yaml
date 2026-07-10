@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cn-ecs-web-app.fullname" . }}
+spec:
+  revisionHistoryLimit: 1
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "cn-ecs-web-app.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "cn-ecs-web-app.name" . }}
+    spec:
+      containers:
+        - name: {{ include "cn-ecs-web-app.name" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "cn-ecs-web-app.fullname" . }}-config
+            - secretRef:
+                name: {{ include "cn-ecs-web-app.fullname" . }}-secrets

@@ -1,0 +1,33 @@
+formio:
+  replicaCount: 1
+
+  image:
+    repository: formio/formio-enterprise
+    tag: "8.3.3"
+    pullPolicy: IfNotPresent
+  port: 3001
+
+pdf:
+  replicaCount: 1
+  image:
+    repository: formio/pdf-server
+    tag: "5.0.0"
+    pullPolicy: IfNotPresent
+  port: 4005
+
+env:
+  PORTAL_ENABLED: false
+  ADMIN_EMAIL: ""
+  LICENSE_KEY: "l9K18lz6vHBLCAwkjGtjQEGbTCq43"
+  SSO_TEAMS: false
+  PDF_SERVER: "https://dev-myforms.chickasaw.net/pdf"
+  FORMIO_PDF_PORT: ""
+  FORMIO_S3_SERVER: "https://dev-myfiles.chickasaw.net"
+  FORMIO_S3_PORT: 443
+  FORMIO_S3_BUCKET: "formio-file-upload-develop"
+  FORMIO_S3_KEY: "formio-file-upload-develop-user"
+  PORT: "8081"
+    
+ingress:
+  enabled: true
+  host: dev-ecs-formio.int.chickasaw.net

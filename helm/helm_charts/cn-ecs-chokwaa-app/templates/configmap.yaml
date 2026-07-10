@@ -1,0 +1,11 @@
+# templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cn-ecs-chokwaa-app.fullname" . }}-config
+  labels:
+    {{- include "cn-ecs-chokwaa-app.labels" . | nindent 4 }}
+data:
+{{- range $key, $value := .Values.env }}
+  {{ $key }}: {{ $value | quote }}
+{{- end }}

@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cn-ecs-chokwaa-app.fullname" . }}
+spec:
+  revisionHistoryLimit: 1
+  replicas: {{ .Values.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ include "cn-ecs-chokwaa-app.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "cn-ecs-chokwaa-app.name" . }}
+    spec:
+      containers:
+        - name: {{ include "cn-ecs-chokwaa-app.name" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "cn-ecs-chokwaa-app.fullname" . }}-config
+{{- if .Values.createSecret }}
+            - secretRef:
+                name: {{ include "cn-ecs-chokwaa-app.fullname" . }}-secrets
+{{- end }}

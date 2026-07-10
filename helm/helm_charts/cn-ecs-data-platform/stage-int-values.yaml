@@ -1,0 +1,87 @@
+replicaCount: 1
+image:
+  repository: cn-ecs-data-platform
+  tag: "1.0.16"
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+ingress:
+  enabled: true
+  className: nginx
+  host: stage-ecs-data-platform.int.chickasaw.net
+  path: /
+  pathType: Prefix
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  tls:
+    enabled: false
+    secretName: ""
+createSecret: false
+env:
+  ASPNETCORE_ENVIRONMENT: "Stage"
+  ASPNETCORE_HTTP_PORTS: "8080"
+  ECS_MONGODB_DATABASE: "ecs_stage"
+  ApplicationHistory__DraftRetentionPeriod: "-1"
+  OpenIddict__Authority: "https://stage-ecs-myaccount.int.chickasaw.net/"
+  OpenIddict__Audience: "cn-ecs-data-platform"
+  OpenIddict__ClientId: "cn-ecs-data-platform"
+  OpenApi__Enabled: "true"
+  OpenApi__Document__Name: "v1"
+  OpenApi__Document__Title: "ECS Data Platform"
+  OpenApi__Document__Version: "1"
+  OpenApi__Security__OAuth2__SchemeName: "oauth2"
+  OpenApi__Security__OAuth2__AuthorizationEndpointPath: "connect/authorize"
+  OpenApi__Security__OAuth2__TokenEndpointPath: "connect/token"
+  OpenApi__Security__OAuth2__TokenEndpointOverride: "/swagger/oauth2-token-proxy"
+  OpenApi__Security__OAuth2__Scopes__openid: "Sign in"
+  OpenApi__Security__OAuth2__Scopes__profile: "Basic profile (name)"
+  OpenApi__Security__OAuth2__Scopes__email: "Email address"
+  OpenApi__Security__OAuth2__Scopes__roles: "Authorization groups"
+  OpenApi__Security__OAuth2__Scopes__offline_access: "Refresh token"
+  OpenApi__Security__OAuth2__Scopes__Profile.Read: "Read your Chokwaa profile"
+  OpenApi__Security__OAuth2__Scopes__Profile.Write: "Update your Chokwaa profile"
+  OpenApi__Security__OAuth2__Scopes__Services.Read: "Read services data"
+  OpenApi__Security__OAuth2__RequiredScopes__0: "openid"
+  OpenApi__Security__OAuth2__RequiredScopes__1: "profile"
+  OpenApi__Security__OAuth2__RequiredScopes__2: "email"
+  OpenApi__Security__OAuth2__RequiredScopes__3: "roles"
+  OpenApi__Security__OAuth2__RequiredScopes__4: "offline_access"
+  OpenApi__Security__OAuth2__RequiredScopes__5: "Profile.Read"
+  OpenApi__Security__OAuth2__RequiredScopes__6: "Profile.Write"
+  OpenApi__Security__OAuth2__RequiredScopes__7: "Services.Read"
+  OpenApi__Security__Bearer__SchemeName: "Bearer"
+  OpenApi__Security__Bearer__HeaderName: "Authorization"
+  OpenApi__Security__Bearer__HttpScheme: "bearer"
+  OpenApi__Security__Bearer__Format: "JWT"
+  OpenApi__SwaggerUi__OAuthClientId: "data-platform-swagger"
+  OpenApi__SwaggerUi__OAuthScopeSeparator: " "
+  OpenApi__SwaggerUi__OAuthUsePkce: "true"
+  DataPlatformSettings__DataPlatformUrl: "https://stage-ecs-data-platform.int.chickasaw.net"
+  EntraInternalId__Instance: "https://login.microsoftonline.com/"
+  EntraInternalId__TenantId: "f29a0ed1-9753-4fea-85e9-df336a63c5d8"
+  EntraInternalId__ClientId: "TBD"
+  EntraInternalId__Audience: "api://[Client ID]"
+  MicrosoftGraph__BaseUrl: "https://graph.microsoft.com/v1.0/"
+  MicrosoftGraph__Scopes: "User.Read"
+  Cniq__Username: ""
+  Cniq__Url: "https://cniqapi.mtctest.chickasaw.net"
+  Cniq__Scope: "api://b02a8df5-dd1c-40a0-872a-4c9deca1c7ff/.default"
+  Cniq__Authority: "https://login.microsoftonline.com/f29a0ed1-9753-4fea-85e9-df336a63c5d8/oauth2/v2.0/token"
+  RabbitMq__HostName: "localhost"
+  RabbitMq__Port: "5672"
+  RabbitMq__VirtualHost: "/"
+  RabbitMq__UserName: "guest"
+  RabbitMq__Exchange: "ecs.data-platform"
+  RabbitMq__UseSsl: "false"
+  RabbitMq__ClientProvidedName: "ecs-data-platform"
+  Notification__Email__MockMode: "true"
+  Notification__Email__FromName: "ECS Notifications"
+  Notification__Sms__MockMode: "true"
+  Notification__WebPush__MockMode: "true"
+  Notification__Email__FromAddress: ""
+  Notification__Sms__AccountSid: ""
+  Notification__Sms__FromNumber: ""
+  Notification__WebPush__EndpointUrl: ""

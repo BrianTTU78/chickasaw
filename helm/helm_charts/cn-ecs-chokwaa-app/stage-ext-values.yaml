@@ -1,0 +1,13 @@
+replicaCount: 1
+image:
+  repository: cn-ecs-chokwaa-app
+  tag: "1.0.65"
+ingress:
+  enabled: true
+  host: stage-my-chickasaw.int.chickasaw.net
+env:
+  VITE_WEBAPP_BASE_URL: "https://stage-ecs-chokwaaapi.int.chickasaw.net"
+  VITE_CHOKWAA_AUTHORITY: "https://stage-ecs-myaccount.int.chickasaw.net/"
+  VITE_CHOKWAA_CLIENT_ID: "chokwaa-app-stage"
+createSecret: false
+secrets: {}
