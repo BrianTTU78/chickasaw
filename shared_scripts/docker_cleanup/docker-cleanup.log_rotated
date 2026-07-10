@@ -1,0 +1,8 @@
+# Place in /etc/logrotate.d/docker-cleanup
+/var/log/docker-cleanup.log {
+    monthly
+    rotate 6
+    compress
+    missingok
+    notifempty
+}
