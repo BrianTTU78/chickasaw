@@ -1,0 +1,7 @@
+- name: Ensure SELinux is set to permissive permanently
+  ansible.builtin.lineinfile:
+    path: /etc/selinux/config
+    regexp: '^SELINUX='
+    line: 'SELINUX=permissive'
+    backup: yes
+  become: yes

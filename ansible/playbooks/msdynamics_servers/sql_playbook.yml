@@ -1,0 +1,73 @@
+---
+# DOWNLOAD NUGET
+- name: Install NuGet provider for PowerShellGet
+  ansible.windows.win_powershell:
+    script: |
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+      $provider = Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
+        Where-Object { $_.Version -ge [version]'2.8.5.201' } |
+        Select-Object -First 1
+
+      if (-not $provider) {
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser
+        Import-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+        $Ansible.Changed = $true
+      }
+      else {
+        Import-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+        $Ansible.Changed = $false
+      }
+
+# TRUSTING PS GALLERY
+- name: Trust PowerShell Gallery
+  ansible.windows.win_powershell:
+    script: |
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+      $repo = Get-PSRepository -Name PSGallery -ErrorAction Stop
+      if ($repo.InstallationPolicy -ne 'Trusted') {
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        $Ansible.Changed = $true
+      }
+      else {
+        $Ansible.Changed = $false
+      }
+
+# INSTALL SQL SERVER PS MODULE
+- name: Install SqlServer PowerShell module
+  ansible.windows.win_powershell:
+    script: |
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+      $existing = Get-Module -ListAvailable -Name SqlServer | Select-Object -First 1
+      if ($existing) {
+        $Ansible.Changed = $false
+        return
+      }
+
+      Install-Module -Name SqlServer -Repository PSGallery -Force -Scope AllUsers
+      $Ansible.Changed = $true
+
+# REMOVE SSRS
+- name: Remove SSRS by product id
+  ansible.windows.win_package:
+    product_id: "{6458abf3-4c65-41d3-8102-54bc635e3325}"
+    state: absent
+
+# INSTALL PS MODULE
+- name: Install SqlServer PowerShell module
+  community.windows.win_psmodule:
+    name: SqlServer
+    state: present
+    repository: PSGallery
+
+# IMPORT D365 TRUSTED SITE TASKS
+- import_tasks: ../common/d365_trusted_sites.yml
+
+# START SERVICE
+- name: Start SQL Server
+  ansible.windows.win_service:
+    name: MSSQLSERVER
+    state: started
+

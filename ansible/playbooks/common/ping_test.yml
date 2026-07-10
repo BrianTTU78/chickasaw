@@ -1,0 +1,4 @@
+---
+
+- name: Run Ansible ping module
+  ansible.builtin.ping:

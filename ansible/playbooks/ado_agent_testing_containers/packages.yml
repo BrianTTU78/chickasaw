@@ -1,0 +1,8 @@
+- name: Install YUM application specific package
+  yum:
+    name:
+      - python3-docker # RUN DOCKER FROM ANSIBLE
+    validate_certs: no
+    state: present
+
+

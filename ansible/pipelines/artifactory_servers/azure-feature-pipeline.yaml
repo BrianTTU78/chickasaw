@@ -1,0 +1,23 @@
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger:
+  branches:
+    include:
+      - feature/*
+      - bug/*
+
+  paths:
+    include:
+      - playbooks/artifactory_servers/**
+      - files/artifactory_servers/**
+
+resources:
+  repositories:
+    - repository: shared_pipelines
+      type: git
+      name: cn_ecs_shared_pipelines
+
+extends:
+  template: shared_feature_ansible_vm_pipeline.yaml@shared_pipelines
+  parameters:
+    playbook_folder: artifactory_servers

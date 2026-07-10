@@ -1,0 +1,161 @@
+---
+# Dynatrace OneAgent Deployment - Task File
+# gather_facts: true must be set in the master playbook or it will bail.
+# DT_OA_VERSION needs to be defined in group_vars or in the cn-ecs-ansible-dynatrace-oneagent Library or it will default to latest (optional but recommended)
+# DYNATRACE_PAAS_TOKEN is defined in cn-ecs-ansible-dynatrace-oneagent Library and called into action when pipeline provide with -e to playbook run (mandatory)
+# ONEAGENT_INSTALL_ARGS can be defined from cn-ecs-ansible-dynatrace-oneagent Library or group_vars and called into action when pipeline provide with -e to playbook run (optional)
+# Inherits host context from the calling playbook
+# ADO Environment Variables (UPPERCASE) Override Ansible Variables (lowercase)
+
+- name: Validation | Verify OS Facts are available
+  assert:
+    that:
+      - ansible_os_family is defined
+    fail_msg: "Facts are missing! Ensure 'gather_facts: true' is set in the master playbook."
+
+- name: Initialize Dynatrace Variables
+  set_fact:
+    dt_api_base: "https://vnx45622.live.dynatrace.com/api/v1/deployment/installer/agent"
+    paas_token: "{{ lookup('env', 'DYNATRACE_PAAS_TOKEN') }}"
+    
+    # The '-' inside the brackets and the '| trim' filter remove the hidden spaces/newlines
+    target_version_path: >-
+      {%- set env_v = lookup('env', 'DT_OA_VERSION') -%}
+      {%- if env_v | length > 0 -%}
+        version/{{ env_v | trim }}
+      {%- elif dt_oa_version is defined and dt_oa_version | length > 0 -%}
+        version/{{ dt_oa_version | trim }}
+      {%- else -%}
+        latest
+      {%- endif -%}
+
+    install_args: >-
+      {%- set env_args = lookup('env', 'ONEAGENT_INSTALL_ARGS') -%}
+      {%- if env_args | length > 0 -%}
+        {{ env_args | trim }}
+      {%- elif oneagent_install_args is defined and oneagent_install_args | length > 0 -%}
+        {{ oneagent_install_args | trim }}
+      {%- else -%}
+        --set-monitoring-mode=fullstack
+      {%- endif -%}
+
+    zone_map: { ada: "ada", ws: "ws" }
+    host_props:
+      server_type: "ServerType=App"
+
+- name: Validation | Ensure PaaS Token is present
+  fail:
+    msg: "DYNATRACE_PAAS_TOKEN is missing from the environment."
+  when: paas_token | length == 0
+
+- name: Logic | Determine Target Host Group
+  set_fact:
+    target_app_group: >-
+      {%- if inventory_hostname | lower | regex_search('^ada.*(dev|tst)') -%}
+        AdaDC_EnterpriseApps_ECSDev
+      {%- elif inventory_hostname | lower | regex_search('^ada.*(dmz|prd|stg)') -%}
+        AdaDC_EnterpriseApps_ECS
+      {%- elif inventory_hostname | lower | regex_search('^ws.*(dev|tst)') -%}
+        Winstar_EnterpriseApps_ECSDev
+      {%- elif inventory_hostname | lower | regex_search('^ws.*(dmz|prd|stg)') -%}
+        Winstar_EnterpriseApps_ECS
+      {%- else -%}
+        Default_Provisioning_Group
+      {%- endif -%}
+
+- name: Logic | Assign Network Zone
+  set_fact:
+    oneagent_network_zone: "{{ zone_map[inventory_hostname[:3] | lower] | default(zone_map[inventory_hostname[:2] | lower]) | default('default_zone') }}"
+
+# ==========================================================
+# LINUX DEPLOYMENT
+# ==========================================================
+- name: Linux Deployment Block
+  when: ansible_os_family != "Windows"
+  become: true
+  block:
+    - name: Linux | Check for existing agent
+      stat:
+        path: /opt/dynatrace/oneagent
+      register: linux_agent_check
+
+    - name: Linux | Perform Installation
+      when: not linux_agent_check.stat.exists
+      block:
+        - name: Linux | Create secure staging path
+          file:
+            path: "/tmp/dt_install"
+            state: directory
+            mode: '0700'
+
+        - name: Linux | Download OneAgent from Dynatrace API
+          get_url:
+            url: "{{ dt_api_base }}/unix/default/{{ target_version_path }}?arch=x86"
+            dest: "/tmp/dt_install/installer.sh"
+            headers:
+              Authorization: "Api-Token {{ paas_token }}"
+            mode: '0755'
+            timeout: 300
+
+        - name: Linux | Execute Installer
+          command: >
+            /bin/bash /tmp/dt_install/installer.sh
+            --set-network-zone="{{ oneagent_network_zone }}"
+            --set-host-group="{{ target_app_group }}"
+            --set-host-property="{{ host_props.server_type }}"
+            {{ install_args }}
+
+# ==========================================================
+# WINDOWS DEPLOYMENT
+# ==========================================================
+- name: Windows Deployment Block
+  when: ansible_os_family == "Windows"
+  block:
+    - name: Windows | Check for existing agent
+      win_stat:
+        path: 'C:\Program Files\Dynatrace\OneAgent'
+      register: win_agent_check
+
+    - name: Windows | Perform Installation
+      when: not win_agent_check.stat.exists
+      block:
+        - name: Windows | Create staging path
+          win_file:
+            path: 'C:\temp\dt_install'
+            state: directory
+
+        - name: Windows | Download OneAgent from Dynatrace API
+          win_get_url:
+            url: "{{ dt_api_base }}/windows/default/{{ target_version_path }}?arch=x86"
+            dest: 'C:\temp\dt_install\installer.exe'
+            headers:
+              Authorization: "Api-Token {{ paas_token }}"
+            timeout: 300
+
+        - name: Windows | Execute win_package
+          win_package:
+            path: 'C:\temp\dt_install\installer.exe'
+            arguments: >-
+                  --set-network-zone="{{ oneagent_network_zone }}"
+                  --set-host-group="{{ target_app_group }}"
+                  --set-host-property="{{ host_props.server_type }}"
+                  {{ install_args }}
+                  --quiet
+            state: present
+
+# ==========================================================
+# POST-INSTALL CLEANUP
+# ==========================================================
+- name: Cleanup | Remove Linux staging artifacts
+  file:
+    path: "/tmp/dt_install"
+    state: absent
+  when: ansible_os_family != "Windows"
+  ignore_errors: true
+
+- name: Cleanup | Remove Windows staging artifacts
+  win_file:
+    path: 'C:\temp\dt_install'
+    state: absent
+  when: ansible_os_family == "Windows"
+  ignore_errors: true

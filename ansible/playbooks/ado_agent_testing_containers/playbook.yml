@@ -1,0 +1,87 @@
+---
+- name: Setup ADO Agent Containers
+  hosts: ado
+  become: yes
+  gather_facts: true
+
+  vars:
+    agent_user: cnadmin
+    ado_url: https://azdevops.int.chickasaw.net
+    ado_collection: "Tribal Services"
+    ado_project: "Enhanced Citizen Services"
+    ado_agent_count: 2
+  
+  tasks:
+
+    # Import Application Package Requirements
+    - import_tasks: packages.yml
+
+    # Set Image Filename
+    - name: Normalize image filename
+      set_fact:
+        ADO_CONTAINER_IMAGE_FILE: "{{ ADO_CONTAINER_IMAGE | replace(':', '-') }}"
+    
+    # Debug Output to Verify Pipeline
+    - name: Docker Image Name
+      debug:
+        msg: "ADO_CONTAINER_IMAGE: {{ ADO_CONTAINER_IMAGE }}"
+  
+    - name: Determine ADO pool
+      set_fact:
+        ado_pool: >-
+          {{
+            'ADA-ECS-DEV-Container-Testing-Agents'
+            if inventory_hostname | upper is match('^ADAVDEV')
+            else 'ADA-ECS-PROD-Container-Testing-Agents'
+            if inventory_hostname | upper is match('^ADAVPRD')
+            else 'WS-ECS-STAGE-Container-Testing-Agents'
+            if inventory_hostname | upper is match('^WSV')
+            else 'UNKNOWN'
+          }}
+
+    - name: Validate ADO pool
+      fail:
+        msg: "No ADO pool found for {{ inventory_hostname }}"
+      when: ado_pool == 'UNKNOWN'
+
+    - name: Set ADO_URL with URL-encoded values
+      set_fact:
+        ado_url_full: "{{ ado_url }}/{{ ado_collection | urlencode }}/"
+
+    # SET FACTS ON ADO CONTAINER PREFIX
+    - name: Determine Agent Name Prefix
+      set_fact:
+        agent_name: >-
+          {{
+            'ada-ecs-dev-testing-agent'
+            if inventory_hostname | upper is match('^ADAVDEV')
+            else 'ada-ecs-prod-testing-agent'
+            if inventory_hostname | upper is match('^ADAVPRD')
+            else 'ws-ecs-stage-testing-agent'
+            if inventory_hostname | upper is match('^WSV')
+            else 'UNKNOWN'
+          }}
+
+    # START CONTAINER AGENT
+    - name: Start Azure DevOps agent containers
+      become: true
+      become_user: "{{ cn_admin_user }}"
+      ansible.builtin.shell: |
+        docker rm -f {{ agent_name }}{{ '%02d' | format(item) }} 2>/dev/null || true
+        docker load -i /data01/docker/images/{{ ADO_CONTAINER_IMAGE_FILE }}.tar
+        docker run -d \
+          --name {{ agent_name }}{{ '%02d' | format(item) }} \
+          --network host \
+          -v /data01/docker/{{ agent_name }}{{ '%02d' | format(item) }}:/opt/azure/agent/_work:Z \
+          -v /data01/docker/ssh:/home/agent/.ssh:ro \
+          --restart unless-stopped \
+          --group-add 980 \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -e ADO_AGENT_NAME="{{ agent_name }}{{ '%02d' | format(item) }}" \
+          -e ADO_INSTALL_DIR="/opt/azure/agent/" \
+          -e ADO_URL="{{ ado_url_full }}" \
+          -e ADO_PAT="{{ ADO_PAT }}" \
+          -e AZP_DISABLE_AUTOUPDATE=true \
+          -e ADO_AGENT_POOL="{{ ado_pool }}" \
+          {{ ADO_CONTAINER_IMAGE }}
+      loop: "{{ range(1, ado_agent_count + 1) }}"

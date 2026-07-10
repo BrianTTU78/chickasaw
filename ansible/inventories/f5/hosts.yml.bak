@@ -1,0 +1,19 @@
+# inventory/f5/hosts.yml
+
+all:
+  hosts:
+    bigip01:
+      ansible_host: 10.67.5.28 #ada-f5-dmz-ext-1
+    bigip02:
+      ansible_host: 10.67.1.29 #ada-f5-dmz-ext-2
+    children:
+      bigips_prod:
+        hosts:
+          bigip01:
+      bigip_dev:
+        hosts:
+          bigip02:
+     vars:
+       ansible_user: ecs_f5_svc
+       ansible_password:
+       ansible_connection: network_cli

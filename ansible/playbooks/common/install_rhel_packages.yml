@@ -1,0 +1,67 @@
+---
+# UPDATE ALL PACKAGES TO THE LASTEST
+- name: Update all packages to the latest version
+  dnf:
+    name: "*"
+    state: latest
+    update_cache: yes
+    disablerepo: kubernetes
+
+- name: Add EPEL 9 repo without SSL verification
+  ansible.builtin.yum_repository:
+    name: epel
+    description: Extra Packages for Enterprise Linux 9
+    baseurl: https://dl.fedoraproject.org/pub/epel/9/Everything/x86_64/
+    gpgcheck: no
+    sslverify: no
+    enabled: yes
+
+# INSTALL YUM PACKAGE
+- name: Install YUM base package
+  yum:
+    name:
+      - ca-certificates
+      - curl
+      - telnet
+      - dnf
+      - rsync
+      - net-tools
+      - nc
+      - tree
+      - gzip
+      - epel-release
+      - figlet
+      - yum-utils
+      - python3
+      - python3-pip
+      - git
+      - yq
+      - sysstat
+      - btop
+      - iotop
+      - perf
+      - dstat
+      - nethogs
+      - iftop
+      - fio
+      - ncdu
+      - nmap
+      - wireshark-cli
+      - gdb
+      - valgrind
+      - crash
+      - lnav
+      - socat
+      - fzf
+    state: present
+    validate_certs: no
+    disablerepo: kubernetes
+
+# UPDATE PATH
+- name: Ensure /usr/local/bin is in global PATH
+  ansible.builtin.lineinfile:
+    path: /etc/profile.d/custom_path.sh
+    line: 'export PATH=$PATH:/usr/local/bin'
+    create: yes
+    mode: '0644'
+  become: true

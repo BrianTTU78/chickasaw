@@ -1,0 +1,948 @@
+---
+# CREATE DIRECTORY
+- name: Verify Directory Exists D:\Dyn365
+  ansible.windows.win_file:
+    path: "D:\\Dyn365"
+    state: directory
+
+###################################
+# FRONTEND XML
+###################################
+- name: Fetch and copy Frontend Components XML
+  when: download_frontend_xml | bool
+  block:
+    - name: Fetch Frontend Components XML
+      ansible.builtin.fetch:
+        src: "/data01/files/d365/{{ env | lower }}_D365_frontend_components.xml"
+        dest: "/tmp/{{ env | lower }}_D365_frontend_components.xml"
+        flat: yes
+      delegate_to: "{{ artifactory_host }}"
+      run_once: true
+
+    - name: Copy Frontend Components XML
+      ansible.windows.win_copy:
+        src: "/tmp/{{ env | lower }}_D365_frontend_components.xml"
+        dest: "D:\\Dyn365\\D365_frontend_components.xml"
+
+###################################
+# D365 ISO
+###################################
+- name: Fetch and copy D365 ISO
+  when: download_iso | bool
+  block:
+    - name: Fetch Dyn_365_9.0.ISO
+      ansible.builtin.fetch:
+        src: "/data01/files/d365/Dyn_365_9.0.ISO"
+        dest: "/tmp/Dyn_365_9.0.ISO"
+        flat: yes
+      delegate_to: "{{ artifactory_host }}"
+      run_once: true
+
+    - name: Copy D365 ISO
+      ansible.windows.win_copy:
+        src: "/tmp/Dyn_365_9.0.ISO"
+        dest: "D:\\Dyn365\\Dyn_365_9.0.ISO"
+
+###################################
+# CRM UPDATES ZIP
+###################################
+- name: Fetch, copy and extract CRM_Updates.zip
+  when: download_crm_updates | bool
+  block:
+    - name: Fetch CRM_Updates.zip
+      ansible.builtin.fetch:
+        src: "/data01/files/d365/CRM_Updates.zip"
+        dest: "/tmp/CRM_Updates.zip"
+        flat: yes
+      delegate_to: "{{ artifactory_host }}"
+      run_once: true
+
+    - name: Copy CRM_Updates.zip
+      ansible.windows.win_copy:
+        src: "/tmp/CRM_Updates.zip"
+        dest: "D:\\Dyn365\\CRM_Updates.zip"
+
+    - name: Extract CRM_Updates.zip
+      community.windows.win_unzip:
+        src: "D:\\Dyn365\\CRM_Updates.zip"
+        dest: "D:\\Dyn365\\"
+        delete_archive: yes
+
+###################################
+# EMAIL ROUTER ZIP
+###################################
+- name: Fetch, copy and extract Email_Router_Installer_From_ISO.zip
+  when: download_email_router | bool
+  block:
+    - name: Fetch Email_Router_Installer_From_ISO.zip
+      ansible.builtin.fetch:
+        src: "/data01/files/d365/Email_Router_Installer_From_ISO.zip"
+        dest: "/tmp/Email_Router_Installer_From_ISO.zip"
+        flat: yes
+      delegate_to: "{{ artifactory_host }}"
+      run_once: true
+
+    - name: Copy Email_Router_Installer_From_ISO.zip
+      ansible.windows.win_copy:
+        src: "/tmp/Email_Router_Installer_From_ISO.zip"
+        dest: "D:\\Dyn365\\Email_Router_Installer_From_ISO.zip"
+
+    - name: Extract Email_Router_Installer_From_ISO.zip
+      community.windows.win_unzip:
+        src: "D:\\Dyn365\\Email_Router_Installer_From_ISO.zip"
+        dest: "D:\\Dyn365\\"
+        delete_archive: yes
+
+###################################
+# SCRIPTS ZIP
+###################################
+- name: Fetch, copy and extract Scripts.zip
+  when: download_scripts | bool
+  block:
+    - name: Fetch Scripts.zip
+      ansible.builtin.fetch:
+        src: "/data01/files/d365/Scripts.zip"
+        dest: "/tmp/Scripts.zip"
+        flat: yes
+      delegate_to: "{{ artifactory_host }}"
+      run_once: true
+
+    - name: Copy Scripts.zip
+      ansible.windows.win_copy:
+        src: "/tmp/Scripts.zip"
+        dest: "D:\\Dyn365\\Scripts.zip"
+
+    - name: Extract Scripts.zip
+      community.windows.win_unzip:
+        src: "D:\\Dyn365\\Scripts.zip"
+        dest: "D:\\Dyn365\\"
+        delete_archive: yes
+
+###################################
+# SRS DATA CONN FIX ZIP
+###################################
+- name: Fetch, copy and extract SRS_Data_Conn_Fix_install.zip
+  when: download_srs_fix | bool
+  block:
+    - name: Fetch SRS_Data_Conn_Fix_install.zip
+      ansible.builtin.fetch:
+        src: "/data01/files/d365/SRS_Data_Conn_Fix_install.zip"
+        dest: "/tmp/SRS_Data_Conn_Fix_install.zip"
+        flat: yes
+      delegate_to: "{{ artifactory_host }}"
+      run_once: true
+
+    - name: Copy SRS_Data_Conn_Fix_install.zip
+      ansible.windows.win_copy:
+        src: "/tmp/SRS_Data_Conn_Fix_install.zip"
+        dest: "D:\\Dyn365\\SRS_Data_Conn_Fix_install.zip"
+
+    - name: Extract SRS_Data_Conn_Fix_install.zip
+      community.windows.win_unzip:
+        src: "D:\\Dyn365\\SRS_Data_Conn_Fix_install.zip"
+        dest: "D:\\Dyn365\\"
+        delete_archive: yes
+
+###################################
+# WINDOWS LIVE ID ZIP
+###################################
+- name: Fetch, copy and extract Windows_Live_ID_Sign-in_Assistant.zip
+  when: download_live_id | bool
+  block:
+    - name: Fetch Windows_Live_ID_Sign-in_Assistant.zip
+      ansible.builtin.fetch:
+        src: "/data01/files/d365/Windows_Live_ID_Sign-in_Assistant.zip"
+        dest: "/tmp/Windows_Live_ID_Sign-in_Assistant.zip"
+        flat: yes
+      delegate_to: "{{ artifactory_host }}"
+      run_once: true
+
+    - name: Copy Windows_Live_ID_Sign-in_Assistant.zip
+      ansible.windows.win_copy:
+        src: "/tmp/Windows_Live_ID_Sign-in_Assistant.zip"
+        dest: "D:\\Dyn365\\Windows_Live_ID_Sign-in_Assistant.zip"
+
+    - name: Extract Windows_Live_ID_Sign-in_Assistant.zip
+      community.windows.win_unzip:
+        src: "D:\\Dyn365\\Windows_Live_ID_Sign-in_Assistant.zip"
+        dest: "D:\\Dyn365\\"
+        delete_archive: yes
+
+# ADD / VERIFY USER EXIST IN LOG ON GROUP
+- name: Allow service accounts to log on as a service
+  ansible.windows.win_user_right:
+    name: SeServiceLogonRight
+    users:
+      - 'INT\DYN_AS_{{ short_env | upper }}'
+      - 'INT\DYN_ASYN_{{ short_env | upper }}'
+      - 'INT\DYN_DWS_{{ short_env | upper }}'
+      - 'INT\DYN_VSS_{{ short_env | upper }}'
+      - 'INT\DYN_SB_{{ short_env | upper }}'
+      - 'INT\DYN_MS_{{ short_env | upper }}'
+      - 'INT\DYN_SU_{{ short_env | upper }}'
+      - 'INT\DYN_SSRS_{{ short_env | upper }}'
+    action: add
+
+###################################
+# IIS TASKS START
+###################################
+
+# DEFINE FEATURE LIST ONCE
+- name: Define IIS feature list
+  ansible.builtin.set_fact:
+    iis_feature_list:
+      - NET-Framework-45-Core
+      - NET-Framework-45-ASPNET
+      - Web-Server
+      - Web-Static-Content
+      - Web-Default-Doc
+      - Web-Dir-Browsing
+      - Web-Http-Errors
+      - Web-App-Dev
+      - Web-Asp-Net45
+      - Web-ISAPI-Ext
+      - Web-ISAPI-Filter
+      - Web-Health
+      - Web-Http-Logging
+      - Web-Log-Libraries
+      - Web-Request-Monitor
+      - Web-Http-Tracing
+      - Web-Security
+      - Web-Basic-Auth
+      - Web-Windows-Auth
+      - Web-Filtering
+      - Web-Digest-Auth
+      - Web-Performance
+      - Web-Stat-Compression
+      - Web-Dyn-Compression
+      - Web-Mgmt-Tools
+      - Web-Mgmt-Console
+      - Web-Mgmt-Compat
+      - Web-Metabase
+      - WAS
+      - WAS-Process-Model
+      - Web-Lgcy-Scripting
+      - Windows-Identity-Foundation
+      - Server-Media-Foundation
+      - Xps-Viewer
+      - RSAT-Role-Tools
+      - RSAT-AD-Tools
+      - RSAT-AD-PowerShell
+      - RSAT-ADDS
+      - RSAT-AD-AdminCenter
+      - RSAT-ADDS-Tools
+      - RSAT-ADLDS
+      - WAS-Config-APIs
+
+# CHECK IF ANY REQUESTED FEATURE IS MISSING
+- name: Check whether IIS feature install is needed
+  ansible.windows.win_powershell:
+    script: |
+      $features = @(
+        {{ iis_feature_list | map('regex_replace', '^(.*)$', "'\1'") | join(", ") }}
+      )
+
+      $missing = Get-WindowsFeature |
+        Where-Object { $_.Name -in $features -and $_.InstallState -ne 'Installed' } |
+        Select-Object -ExpandProperty Name
+
+      $missing
+  register: missing_iis_features
+  changed_when: false
+
+# CREATE MISSING FEATURES LIST
+- name: Set IIS install needed flag
+  ansible.builtin.set_fact:
+    iis_features_needed: "{{ missing_iis_features.output | default([]) | length > 0 }}"
+
+# INSTALL MISSING FEATURES
+- name: Install IIS features only when needed
+  when: iis_features_needed
+  block:
+    # DISABLE WSUS
+    - name: Disable WSUS temporarily
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU
+        name: UseWUServer
+        data: 0
+        type: dword
+
+    # RESTART WINDOWS UPDATE
+    - name: Restart Windows Update service
+      ansible.windows.win_service:
+        name: wuauserv
+        state: restarted
+
+    # INSTALL TASK
+    - name: Install IIS Web Server and Common HTTP Features
+      ansible.windows.win_feature:
+        name: "{{ iis_feature_list }}"
+        state: present
+        include_management_tools: true
+      register: feature_install
+      retries: 3
+      delay: 30
+      until: feature_install is succeeded
+
+  always:
+    # ENABLE WSUS IF FEATURE INSTALLED
+    - name: Re-enable WSUS
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU
+        name: UseWUServer
+        data: 1
+        type: dword
+      when: iis_features_needed
+
+    # RESTART WINDOWS UPDATE
+    - name: Restart Windows Update service again
+      ansible.windows.win_service:
+        name: wuauserv
+        state: restarted
+      when: iis_features_needed
+
+
+# INSTALL THIS ALONE ( THIS FAILS, NEEDS TO BE RESOLVED OR DELETED )
+#- name: Install WAS-NET-Environment
+#  ansible.windows.win_feature:
+#    name:
+#      - WAS-NET-Environment
+#    state: present
+#  register: was_net_environment_install
+#  retries: 3
+#  delay: 30
+#  until: was_net_environment_install is succeeded
+
+# CREATE DIR FOR LOGS
+- name: Ensure IIS log directory exists
+  ansible.windows.win_file:
+    path: "D:\\inetpub\\logs\\LogFiles"
+    state: directory
+
+# MOVE IIS LOGS TO D DRIVE
+- name: Move IIS logs to D drive
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration
+    Get-Website | ForEach-Object {
+        Set-ItemProperty "IIS:\\Sites\\$($_.Name)" -Name logfile.directory -Value "D:\\inetpub\\logs\\LogFiles"
+    }
+
+# REMOVE DEFAULT IIS WEBSITE
+- name: Remove Default Web Site via PowerShell
+  ansible.windows.win_powershell:
+    script: |
+      Import-Module WebAdministration
+      if (Test-Path "IIS:\Sites\Default Web Site") {
+          Remove-Website -Name "Default Web Site"
+      }
+
+###################################
+# IIS TASKS END
+###################################
+
+###################################
+# USER VERIFICATIONS START
+###################################
+
+# ADD / VERIFY USER EXIST IN BATCH LOGON GROUP. #### FAILING CURRENTLY
+- name: Allow service accounts to log on as a batch job
+  ansible.windows.win_user_right:
+    name: SeBatchLogonRight
+    users:
+      - 'INT\DYN_AS_{{ short_env | upper }}'
+      - 'INT\DYN_DWS_{{ short_env | upper }}'
+    action: add
+
+# ADD / VERIFY USER EXIST IN BACKUP GROUP
+- name: "Ensure INT\\DYN_VSS_{{ short_env | upper }} is in Backup Operators"
+  ansible.windows.win_group_membership:
+    name: "Backup Operators"
+    members:
+      - "INT\\DYN_VSS_{{ short_env | upper }}"
+    state: present
+  
+# ADD / VERIFY USER EXISTS IN PERFORMANCE GROUP
+- name: Ensure users are members of Performance Log Users
+  ansible.windows.win_group_membership:
+    name: "Performance Log Users"
+    members:
+      - "INT\\DYN_AS_{{ short_env | upper }}"
+      - "INT\\DYN_ASYN_{{ short_env | upper }}"
+    state: present
+
+# ADD / VERIFY USER EXISTS IN LOCAL ADMIN
+- name: Ensure users are in Administrators group
+  ansible.windows.win_group_membership:
+    name: "Administrators"
+    members:
+      - "INT\\DYN_AS_{{ short_env | upper }}"
+      - "INT\\DYN_DWS_{{ short_env | upper }}"
+      - "INT\\DYN_MS_{{ short_env | upper }}"
+      - "INT\\DYN_SQL_{{ short_env | upper }}"
+      - "INT\\DYN_SU_{{ short_env | upper }}"
+    state: present
+
+###################################
+# USER VERIFICATIONS END
+###################################
+
+###################################
+# CERTIFICATE TASKS START
+###################################
+
+# CERT TARGETING (WEB)
+- name: Determine if this host should receive the MyECS certificate
+  ansible.builtin.set_fact:
+    install_myecs_cert: >-
+      {{
+        ansible_hostname | lower is search('dynweb') or
+        ansible_hostname | lower is search('dwb') or
+        ansible_hostname | lower is search('web')
+      }}
+
+- name: Determine if MyECS cert is shared or individual
+  ansible.builtin.set_fact:
+    myecs_cert_shared: "{{ env | lower in ['stage', 'prod'] }}"
+
+- name: Ensure D:\Dyn365\cert directory exists
+  ansible.windows.win_file:
+    path: "D:\\Dyn365\\cert"
+    state: directory
+  when: install_myecs_cert | bool
+
+- name: Check if MyECS certificate already exists in local machine store
+  ansible.windows.win_shell: |
+    $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object {
+      $_.Subject -eq "CN={{ env }}-myecs.int.chickasaw.net" -and
+      $_.NotAfter -gt (Get-Date)
+    }
+    if ($cert -and $cert.Count -gt 0) {
+      Write-Output "CERT_FOUND"
+    } else {
+      Write-Output "CERT_NOT_FOUND"
+    }
+  register: myecs_cert_check
+  changed_when: false
+  when: install_myecs_cert | bool
+
+- name: Notify — valid MyECS certificate already exists, skipping import
+  ansible.builtin.debug:
+    msg: "NOTICE: A valid MyECS certificate (CN={{ env }}-myecs.int.chickasaw.net) already exists on {{ ansible_hostname }} — files will be copied but import will be skipped"
+  when:
+    - install_myecs_cert | bool
+    - myecs_cert_check.stdout_lines is defined
+    - "'CERT_FOUND' in myecs_cert_check.stdout_lines"
+
+# -------------------------------------------------------
+# INDIVIDUAL CERT (dev/test)
+# src: /data01/files/d365/certs/{env}/{SERVER}/myecs/{env}-myecs-{server}.pfx
+# -------------------------------------------------------
+- name: Fetch, copy and import MyECS certificate (individual)
+  when:
+    - install_myecs_cert | bool
+    - not myecs_cert_shared | bool
+  block:
+    - name: Fetch MyECS .pfx from artifactory (individual)
+      ansible.builtin.fetch:
+        src: "/data01/files/d365/certs/{{ env }}/{{ ansible_hostname }}/myecs/{{ env }}-myecs-{{ ansible_hostname | lower }}.pfx"
+        dest: "/tmp/{{ env }}-myecs-{{ ansible_hostname | lower }}.pfx"
+        flat: yes
+      delegate_to: "{{ artifactory_host }}"
+
+    - name: Copy MyECS .pfx to D:\Dyn365\cert (individual)
+      ansible.windows.win_copy:
+        src: "/tmp/{{ env }}-myecs-{{ ansible_hostname | lower }}.pfx"
+        dest: "D:\\Dyn365\\cert\\{{ env }}-myecs-{{ ansible_hostname | lower }}.pfx"
+
+    - name: Import MyECS PFX into LocalMachine\My certificate store (individual)
+      ansible.windows.win_shell: |
+        Import-PfxCertificate `
+          -FilePath "D:\Dyn365\cert\{{ env }}-myecs-{{ ansible_hostname | lower }}.pfx" `
+          -CertStoreLocation Cert:\LocalMachine\My `
+          -Exportable
+      when:
+        - myecs_cert_check.stdout_lines is defined
+        - "'CERT_NOT_FOUND' in myecs_cert_check.stdout_lines"
+
+# -------------------------------------------------------
+# SHARED CERT (stage/prod)
+# src: /data01/files/d365/certs/{env}/shared/myecs/{env}-myecs-shared.pfx
+# -------------------------------------------------------
+- name: Fetch, copy and import MyECS certificate (shared)
+  when:
+    - install_myecs_cert | bool
+    - myecs_cert_shared | bool
+  block:
+    - name: Fetch MyECS .pfx from artifactory (shared)
+      ansible.builtin.fetch:
+        src: "/data01/files/d365/certs/{{ env }}/shared/myecs/{{ env }}-myecs-shared.pfx"
+        dest: "/tmp/{{ env }}-myecs-shared.pfx"
+        flat: yes
+      delegate_to: "{{ artifactory_host }}"
+
+    - name: Copy MyECS .pfx to D:\Dyn365\cert (shared)
+      ansible.windows.win_copy:
+        src: "/tmp/{{ env }}-myecs-shared.pfx"
+        dest: "D:\\Dyn365\\cert\\{{ env }}-myecs-shared.pfx"
+
+    - name: Import MyECS PFX into LocalMachine\My certificate store (shared)
+      ansible.windows.win_shell: |
+        Import-PfxCertificate `
+          -FilePath "D:\Dyn365\cert\{{ env }}-myecs-shared.pfx" `
+          -CertStoreLocation Cert:\LocalMachine\My `
+          -Exportable
+      when:
+        - myecs_cert_check.stdout_lines is defined
+        - "'CERT_NOT_FOUND' in myecs_cert_check.stdout_lines"
+
+- name: Skip MyECS certificate — host does not meet criteria
+  ansible.builtin.debug:
+    msg: "Skipping MyECS cert — {{ ansible_hostname }} does not match 'dynweb', 'dwb', or 'web'"
+  when: not install_myecs_cert | bool
+
+###################################
+# CERTIFICATE TASKS END
+###################################
+
+###################################
+# FIREWALL TASKS START
+###################################
+
+- name: Determine if this host runs SSRS / Reporting Extensions
+  ansible.builtin.set_fact:
+    is_ssrs_host: >-
+      {{
+        (env | lower in ['dev', 'test'] and ansible_hostname | lower is search('app01')) or
+        (env | lower in ['stage', 'prod'] and ansible_hostname | lower is search('app03'))
+      }}
+
+- name: Check and configure required CRM firewall rules
+  block:
+
+    # -------------------------------------------------------
+    # PORT 80 (TCP) — HTTP redirect
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 80 (TCP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol TCP | Where-Object {
+          $_.LocalPort -eq "80"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_80
+      changed_when: false
+
+    - name: Notify — firewall rule for port 80 (TCP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 80 (TCP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_80.stdout_lines"
+
+    - name: Create firewall rule for port 80 (TCP) — HTTP redirect
+      community.windows.win_firewall_rule:
+        name: "CRM - HTTP 80 (TCP)"
+        localport: "80"
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_80.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORT 135 (TCP) — RPC endpoint resolution
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 135 (TCP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol TCP | Where-Object {
+          $_.LocalPort -eq "135"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_135
+      changed_when: false
+
+    - name: Notify — firewall rule for port 135 (TCP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 135 (TCP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_135.stdout_lines"
+
+    - name: Create firewall rule for port 135 (TCP) — RPC endpoint resolution
+      community.windows.win_firewall_rule:
+        name: "CRM - RPC 135 (TCP)"
+        localport: "135"
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_135.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORT 139 (TCP) — NETBIOS session service
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 139 (TCP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol TCP | Where-Object {
+          $_.LocalPort -eq "139"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_139
+      changed_when: false
+
+    - name: Notify — firewall rule for port 139 (TCP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 139 (TCP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_139.stdout_lines"
+
+    - name: Create firewall rule for port 139 (TCP) — NETBIOS session service
+      community.windows.win_firewall_rule:
+        name: "CRM - NETBIOS Session 139 (TCP)"
+        localport: "139"
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_139.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORT 443 (TCP) — CRM web traffic, IFD, AD FS
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 443 (TCP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol TCP | Where-Object {
+          $_.LocalPort -eq "443"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_443
+      changed_when: false
+
+    - name: Notify — firewall rule for port 443 (TCP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 443 (TCP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_443.stdout_lines"
+
+    - name: Create firewall rule for port 443 (TCP) — CRM web traffic, IFD, AD FS
+      community.windows.win_firewall_rule:
+        name: "CRM - HTTPS 443 (TCP)"
+        localport: "443"
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_443.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORT 445 (TCP) — Microsoft-DS / Active Directory / SMB
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 445 (TCP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol TCP | Where-Object {
+          $_.LocalPort -eq "445"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_445_tcp
+      changed_when: false
+
+    - name: Notify — firewall rule for port 445 (TCP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 445 (TCP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_445_tcp.stdout_lines"
+
+    - name: Create firewall rule for port 445 (TCP) — Microsoft-DS / Active Directory / SMB
+      community.windows.win_firewall_rule:
+        name: "CRM - Microsoft-DS 445 (TCP)"
+        localport: "445"
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_445_tcp.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORT 808 (TCP) — Windows Process Activation (WAS)
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 808 (TCP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol TCP | Where-Object {
+          $_.LocalPort -eq "808"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_808
+      changed_when: false
+
+    - name: Notify — firewall rule for port 808 (TCP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 808 (TCP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_808.stdout_lines"
+
+    - name: Create firewall rule for port 808 (TCP) — Windows Process Activation
+      community.windows.win_firewall_rule:
+        name: "CRM - WAS 808 (TCP)"
+        localport: "808"
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_808.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORTS 49152-65535 (TCP) — RPC / WCF dynamic ports
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for ports 49152-65535 (TCP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol TCP | Where-Object {
+          $_.LocalPort -eq "49152-65535"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_rpc_dynamic
+      changed_when: false
+
+    - name: Notify — firewall rule for ports 49152-65535 (TCP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for ports 49152-65535 (TCP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_rpc_dynamic.stdout_lines"
+
+    - name: Create firewall rule for ports 49152-65535 (TCP) — RPC / WCF dynamic ports
+      community.windows.win_firewall_rule:
+        name: "CRM - RPC WCF Dynamic 49152-65535 (TCP)"
+        localport: "49152-65535"
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_rpc_dynamic.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORT 123 (UDP) — Network Time Protocol
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 123 (UDP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol UDP | Where-Object {
+          $_.LocalPort -eq "123"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_123_udp
+      changed_when: false
+
+    - name: Notify — firewall rule for port 123 (UDP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 123 (UDP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_123_udp.stdout_lines"
+
+    - name: Create firewall rule for port 123 (UDP) — NTP
+      community.windows.win_firewall_rule:
+        name: "CRM - NTP 123 (UDP)"
+        localport: "123"
+        action: allow
+        direction: in
+        protocol: udp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_123_udp.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORT 137 (UDP) — NETBIOS name service
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 137 (UDP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol UDP | Where-Object {
+          $_.LocalPort -eq "137"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_137_udp
+      changed_when: false
+
+    - name: Notify — firewall rule for port 137 (UDP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 137 (UDP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_137_udp.stdout_lines"
+
+    - name: Create firewall rule for port 137 (UDP) — NETBIOS name service
+      community.windows.win_firewall_rule:
+        name: "CRM - NETBIOS NS 137 (UDP)"
+        localport: "137"
+        action: allow
+        direction: in
+        protocol: udp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_137_udp.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORT 138 (UDP) — NETBIOS datagram service
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 138 (UDP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol UDP | Where-Object {
+          $_.LocalPort -eq "138"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_138_udp
+      changed_when: false
+
+    - name: Notify — firewall rule for port 138 (UDP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 138 (UDP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_138_udp.stdout_lines"
+
+    - name: Create firewall rule for port 138 (UDP) — NETBIOS datagram service
+      community.windows.win_firewall_rule:
+        name: "CRM - NETBIOS DGM 138 (UDP)"
+        localport: "138"
+        action: allow
+        direction: in
+        protocol: udp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_138_udp.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORT 445 (UDP) — Microsoft-DS / Active Directory / SMB
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 445 (UDP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol UDP | Where-Object {
+          $_.LocalPort -eq "445"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_445_udp
+      changed_when: false
+
+    - name: Notify — firewall rule for port 445 (UDP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 445 (UDP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_445_udp.stdout_lines"
+
+    - name: Create firewall rule for port 445 (UDP) — Microsoft-DS / Active Directory / SMB
+      community.windows.win_firewall_rule:
+        name: "CRM - Microsoft-DS 445 (UDP)"
+        localport: "445"
+        action: allow
+        direction: in
+        protocol: udp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_445_udp.stdout_lines"
+
+    # -------------------------------------------------------
+    # PORT 1025 (UDP) — DCOM / RPC listener
+    # -------------------------------------------------------
+    - name: Check if firewall rule exists for port 1025 (UDP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol UDP | Where-Object {
+          $_.LocalPort -eq "1025"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_1025_udp
+      changed_when: false
+
+    - name: Notify — firewall rule for port 1025 (UDP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 1025 (UDP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_1025_udp.stdout_lines"
+
+    - name: Create firewall rule for port 1025 (UDP) — DCOM / RPC listener
+      community.windows.win_firewall_rule:
+        name: "CRM - DCOM RPC 1025 (UDP)"
+        localport: "1025"
+        action: allow
+        direction: in
+        protocol: udp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_1025_udp.stdout_lines"
+
+# -------------------------------------------------------
+# SSRS / REPORTING EXTENSIONS PORTS — app01 (dev/test)
+# or app03 (stage/prod) only
+# -------------------------------------------------------
+- name: Check and configure SSRS / Reporting Extensions firewall rules
+  when: is_ssrs_host | bool
+  block:
+
+    # PORT 1433 (TCP) — SQL Server
+    - name: Check if firewall rule exists for port 1433 (TCP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol TCP | Where-Object {
+          $_.LocalPort -eq "1433"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_1433
+      changed_when: false
+
+    - name: Notify — firewall rule for port 1433 (TCP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 1433 (TCP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_1433.stdout_lines"
+
+    - name: Create firewall rule for port 1433 (TCP) — SQL Server
+      community.windows.win_firewall_rule:
+        name: "CRM - SQL Server 1433 (TCP)"
+        localport: "1433"
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_1433.stdout_lines"
+
+    # PORT 1434 (UDP) — SQL Server Browser Service
+    - name: Check if firewall rule exists for port 1434 (UDP)
+      ansible.windows.win_shell: |
+        $rule = Get-NetFirewallPortFilter -Protocol UDP | Where-Object {
+          $_.LocalPort -eq "1434"
+        } | Get-NetFirewallRule | Where-Object {
+          $_.Direction -eq "Inbound" -and $_.Enabled -eq "True"
+        }
+        if ($rule) { Write-Output "RULE_FOUND" } else { Write-Output "RULE_NOT_FOUND" }
+      register: fw_1434_udp
+      changed_when: false
+
+    - name: Notify — firewall rule for port 1434 (UDP) already exists
+      ansible.builtin.debug:
+        msg: "NOTICE: An inbound firewall rule for port 1434 (UDP) already exists on {{ ansible_hostname }} — skipping"
+      when: "'RULE_FOUND' in fw_1434_udp.stdout_lines"
+
+    - name: Create firewall rule for port 1434 (UDP) — SQL Server Browser Service
+      community.windows.win_firewall_rule:
+        name: "CRM - SQL Browser 1434 (UDP)"
+        localport: "1434"
+        action: allow
+        direction: in
+        protocol: udp
+        state: present
+        enabled: yes
+      when: "'RULE_NOT_FOUND' in fw_1434_udp.stdout_lines"
+
+###################################
+# FIREWALL TASKS END
+###################################

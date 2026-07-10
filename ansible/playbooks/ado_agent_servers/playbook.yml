@@ -1,0 +1,296 @@
+---
+- name: Setup ADO Agent Servers
+  hosts: ado
+  become: true
+  gather_facts: true
+
+  vars:
+    agent_dir: /opt/azure/agent
+    agent_user: cnadmin
+    agent_group: cnadmin
+    agent_version: 3.238.0
+    agent_package: vsts-agent-linux-x64-3.238.0.tar.gz
+    agent_url: "https://download.agent.dev.azure.com/agent/{{ agent_version }}/{{ agent_package }}"
+    ado_url: https://azdevops.int.chickasaw.net
+    ado_collection: "Tribal Services"
+    ado_project: "Enhanced Citizen Services"
+    
+  tasks:
+    # Installing Company Certs
+    - import_tasks: ../common/install_corporate_certs.yml
+    # Installing Default OS Packages
+    - import_tasks: ../common/install_rhel_packages.yml
+    # Importing common configure_ansible playbook
+    - import_tasks: ../common/configure_ansible_user.yml
+    # Import Application Package Requirements
+    - import_tasks: packages.yml
+    # Create Admin User
+    - import_tasks: ../common/configure_cnadmin_user.yml
+      vars:
+        cn_admin_user: cnadmin
+    # Import Docker Maintenance Script
+    - import_tasks: ../common/configure_cnadmin_user.yml
+
+   ################################
+   # CONTAINER SSH KEY START
+   ################################
+   # NOTE: This copies the ADO Agent 
+   # SSH public key needed by the containers and
+   # the pipeline copies in the private key
+
+    # CREATE CONTAINER UTILIZED SSH KEY LOCATION
+    - name: Create SSH key directory
+      ansible.builtin.file:
+        path: /data01/docker/ssh
+        state: directory
+        owner: root
+        group: docker
+        mode: '0770'
+
+    - name: Copy ADO Agent SSH Public Key
+      ansible.builtin.copy:
+        src: ../../files/ado_agent_servers/ado_prod_agent_master_key.pub
+        dest: /data01/docker/ssh/ado_prod_agent_master_key.pub
+        owner: root
+        group: docker
+        mode: '0644'
+
+    - name: Copy ADO Agent SSH Public Key
+      ansible.builtin.copy:
+        src: ../../files/ado_agent_servers/known_hosts
+        dest: /data01/docker/ssh/known_hosts
+        owner: root
+        group: docker
+        mode: '0644'
+
+  ################################
+  # CONTAINER SSH KEY END
+  ################################
+    
+  ################################
+  # CONTAINERD CONFIG START
+  ################################
+
+    # ENSURE CONTAINERD FOLDER EXISTS
+    - name: Ensure containerd config directory exists
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    # ENSURE CONTAINERD FOLDER EXISTS
+    - name: Ensure /data01/containerd exists
+      ansible.builtin.file:
+        path: /data01/containerd
+        state: directory
+        owner: root
+        group: root
+        mode: '0711'
+
+    - name: Generate default containerd config if missing
+      ansible.builtin.command:
+        cmd: containerd config default
+      register: containerd_default_config
+      changed_when: false
+
+    - name: Configure containerd root on /data01
+      ansible.builtin.copy:
+        dest: /etc/containerd/config.toml
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          disabled_plugins = ["cri"]
+
+          root = "/data01/containerd"
+          state = "/run/containerd"
+
+  ################################
+  # CONTAINERD CONFIG END
+  ################################
+
+    # CONFIGURE GIT USERNAME & EMAIL
+    - name: Set git user.name for cnadmin
+      become: true
+      become_user: cnadmin
+      ansible.builtin.git_config:
+        name: user.name
+        value: "brian.dickey"
+        scope: global
+
+    - name: Set git user.email for cnadmin
+      become: true
+      become_user: cnadmin
+      ansible.builtin.git_config:
+        name: user.email
+        value: "brian.dickey@chickasaw.net"
+        scope: global
+
+    # ADD DOCKER TO CNADMIN
+    - name: Add docker group to cnadmin user
+      user:
+        name: "{{ cn_admin_user }}"
+        groups: docker
+        append: yes
+
+    # CREATE FOLDER
+    - name: Create Docker image directory
+      file:
+        path: /data01/docker/images
+        state: directory
+        owner: "{{ agent_user }}"
+        group: "{{ agent_group }}"
+        mode: '0755'
+
+    # CREATE FOLDER
+    - name: Create Docker image directory
+      file:
+        path: /data01/docker/runtime/
+        state: directory
+        owner: "root"
+        group: "root"
+        mode: '0755'
+
+    # CONFIGURE DOCKER RUNTIME LOCATION
+    - name: Configure Docker daemon.json
+      copy:
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          {
+            "dns": ["10.60.5.180"],
+            "data-root": "/data01/docker/runtime"
+          }
+
+    # START DOCKER
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    # CREATE OS ADO AGENT DIR
+    - name: Create agent directory
+      ansible.builtin.file:
+        path: "{{ agent_dir }}"
+        state: directory
+        owner: "{{ agent_user }}"
+        group: "{{ agent_group }}"
+        mode: "0755"
+
+    # DOWNLOAD ADO AGENT TAR
+    - name: Download Azure DevOps agent
+      ansible.builtin.get_url:
+        url: "{{ agent_url }}"
+        dest: "{{ agent_dir }}/{{ agent_package }}"
+        mode: "0644"
+        timeout: 60
+
+    # EXTRACT TAR
+    - name: Extract Azure DevOps agent
+      ansible.builtin.unarchive:
+        src: "{{ agent_dir }}/{{ agent_package }}"
+        dest: "{{ agent_dir }}"
+        remote_src: yes
+        owner: "{{ agent_user }}"
+        group: "{{ agent_group }}"
+
+    # DETERMINE DATACENTER
+    - name: Determine ADO Pool
+      set_fact:
+        ado_pool: >-
+          {% if inventory_hostname | upper is match('^ADAVDEV') %}
+          ADA-ECS-DEV
+          {% elif inventory_hostname | upper is match('^ADAVPRD') %}
+          ADA-ECS-PROD
+          {% elif inventory_hostname | upper is match('^WSV') %}
+          WS-ECS-STAGE
+          {% else %}
+          UNKNOWN
+          {% endif %}
+
+    - name: Validate pool selection
+      fail:
+        msg: "No ADO pool mapping found for {{ inventory_hostname }}"
+      when: ado_pool == 'UNKNOWN'
+
+    # CONFIGURE ADO AGENT
+    - name: Configure agent
+      become_user: "{{ agent_user }}"
+      ansible.builtin.command: >
+        ./config.sh
+        --acceptteeeula
+        --url {{ ado_url }}
+        --work _work
+        --pool "{{ ado_pool }}"
+        --agent "{{ inventory_hostname }}"
+        --collectionname "{{ ado_collection }}"
+        --projectname "{{ ado_project }}"
+        --token "{{ ADO_PAT }}"
+        --auth pat
+        --runasservice
+        --unattended
+      args:
+        chdir: "{{ agent_dir }}"
+        creates: "{{ agent_dir }}/.agent"
+      #no_log: true
+
+    # VERIFY SERVICE DOESN'T EXIST
+    - name: Check if agent service exists
+      stat:
+        path: /etc/systemd/system/azdevops-agent.service
+      register: agent_service
+
+    # FIND ORIGINAL NAME SERVICE
+    - name: Find Azure DevOps service file
+      ansible.builtin.find:
+        paths: /etc/systemd/system
+        patterns: "vsts.agent.azdevops.*.service"
+      register: original_ado_service
+
+    # CREATE SERVICE
+    - name: Install service
+      become: true
+      command: ./svc.sh install
+      args:
+        chdir: "{{ agent_dir }}"
+      when: original_ado_service.matched == 0
+
+    # RENAME SERVICE TO EASY NAME
+    - name: Rename Azure DevOps agent service file
+      become: true
+      ansible.builtin.command:
+        cmd: mv "{{ original_ado_service.files[0].path }}" /etc/systemd/system/azdevops-agent.service
+      when: original_ado_service.matched > 0
+
+    - name: Update service user for Azure DevOps agent
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/system/azdevops-agent.service
+        regexp: '^User='
+        line: 'User=cnadmin'
+
+    - name: Reload systemd
+      become: true
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart Azure DevOps agent
+      become: true
+      ansible.builtin.systemd:
+        name: azdevops-agent.service
+        enabled: true
+        state: started
+
+    - name: Configure SELinux context for Docker runtime
+      community.general.sefcontext:
+        target: '/data01/docker/runtime(/.*)?'
+        setype: container_var_lib_t
+        state: present
+
+    # Installing Dynatrace Agent
+    - import_tasks: ../common/install_dynatrace_agent.yml

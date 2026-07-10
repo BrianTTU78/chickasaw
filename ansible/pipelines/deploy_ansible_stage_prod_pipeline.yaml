@@ -1,0 +1,66 @@
+# REPO: cn_ecs_ansible
+# PIPELINE: pipelines/deploy_ansible_prod_pipeline.yaml
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger: none
+pr: none
+
+parameters:
+- name: ADO_CONTAINER_IMAGE
+  displayName: Docker Container Name
+  type: string
+  default: az-ado-linux-agent:1.0.25
+
+variables:
+  - group: cn_pipelines_common
+
+stages:
+- stage: Stage_Deploy
+
+  pool:
+    name: WS-ECS-STAGE
+
+  jobs:
+  - job: AnsibleDeployProd
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # STAGE Deployment
+    - task: Bash@3
+      displayName: Stage Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/ado_agent_containers"
+        script: |
+          ansible-playbook playbook.yml  -i ../../inventories/stage -e "@../../group_vars/stage.yml" -e "ADO_PAT=$ADO_PAT" -e "ADO_CONTAINER_IMAGE=$ADO_CONTAINER_IMAGE"
+        failOnStderr: false
+      env:
+        ADO_PAT: $(ADO_PAT)
+        ADO_CONTAINER_IMAGE: ${{ parameters.ADO_CONTAINER_IMAGE }}
+
+- stage: Prod_Deploy
+
+  pool:
+    name: ADA-ECS-PROD
+
+  jobs:
+  - job: AnsibleDeployProd
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # PROD Deployment
+    - task: Bash@3
+      displayName: Prod Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/ado_agent_containers"
+        script: |
+          ansible-playbook playbook.yml  -i ../../inventories/prod -e "@../../group_vars/prod.yml" -e "ADO_PAT=$ADO_PAT" -e "ADO_CONTAINER_IMAGE=$ADO_CONTAINER_IMAGE"
+        failOnStderr: false
+      env:
+        ADO_PAT: $(ADO_PAT)
+        ADO_CONTAINER_IMAGE: ${{ parameters.ADO_CONTAINER_IMAGE }}

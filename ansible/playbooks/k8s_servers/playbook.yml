@@ -1,0 +1,775 @@
+---
+
+- name: Setup Kubernetes Servers (RKE2)
+  hosts: k8s
+  collections:
+    - kubernetes.core
+  become: true
+  gather_facts: true
+
+  environment:
+    PATH: "/data01/rancher/rke2/bin:{{ ansible_env.PATH }}"
+    KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+
+  tasks:
+    # Installing Company Certs
+    - import_tasks: ../common/install_corporate_certs.yml
+    # Installing Default OS Packages
+    - import_tasks: ../common/install_rhel_packages.yml
+    # Importing common configure_ansible playbook
+    - import_tasks: ../common/configure_ansible_user.yml
+    # Create Admin User
+    - import_tasks: ../common/configure_cnadmin_user.yml
+    # Import Application Package Requirements
+    - import_tasks: packages.yml
+
+    #################################
+    # PROFILE NEEDS
+    #################################
+    - name: Ensure .bash_aliases exists
+      ansible.builtin.file:
+        path: /root/.bash_aliases
+        state: touch
+        owner: root
+        group: root
+        mode: '0640'
+    
+    - name: Add k8s alias (cnadmin)
+      ansible.builtin.lineinfile:
+        path: /home/cnadmin/.bash_aliases
+        line: "alias k8s='${HOME}/bin/managek8s.sh'"
+        create: true
+        owner: cnadmin
+        group: cnadmin
+        mode: '0644'
+
+    - name: Add k8s alias (root)
+      ansible.builtin.lineinfile:
+        path: /root/.bash_aliases
+        line: "alias k8s='${HOME}/bin/managek8s.sh'"
+        create: true
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Update cnadmin alias output help file
+      ansible.builtin.copy:
+        dest: /home/cnadmin/.aliases_output
+        owner: cnadmin
+        group: cnadmin
+        mode: '0644'
+        content: |
+          k8s start = Start Rancher
+          k8s stop = Stop Rancher
+    
+    - name: Update root alias output help file
+      ansible.builtin.copy:
+        dest: /root/.aliases_output
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          k8s start = Start Rancher
+          k8s stop = Stop Rancher
+
+    #################################
+    # PRE-REQUIREMENTS START
+    #################################
+
+    # GET SERVICE DETAILS
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    # DISABLE SWAP
+    - name: Disable swap immediately
+      ansible.builtin.command: swapoff -a
+      become: true
+      when: ansible_swaptotal_mb > 0
+      
+    # REMOVE SWAP ENTRIES
+    - name: Remove swap entries from /etc/fstab
+      ansible.builtin.mount:
+        name: swap
+        fstype: swap
+        state: absent
+      become: true
+
+    # SET SELINUX
+    - name: Set SELinux to permissive permanently
+      ansible.builtin.lineinfile:
+        path: /etc/selinux/config
+        regexp: '^SELINUX='
+        line: 'SELINUX=permissive'
+        backup: true
+      become: true
+    
+    # ENSURE MODULES INSTALLED
+    - name: Persist required kernel modules for RKE2
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/rke2.conf
+        content: |
+          br_netfilter
+          overlay
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+
+    # LOAD REQUIRED KERNEL MODULES NOW (1)
+    - name: Load overlay module
+      ansible.builtin.modprobe:
+        name: overlay
+        state: present
+      become: true
+
+    # LOAD REQUIRED KERNEL MODULES NOW (2)
+    - name: Load br_netfilter module
+      ansible.builtin.modprobe:
+        name: br_netfilter
+        state: present
+      become: true
+    
+    # CHECK NETWORK MANAGER
+    - name: Check if NetworkManager RKE2 config exists
+      ansible.builtin.stat:
+        path: /etc/NetworkManager/conf.d/rke2-canal.conf
+      register: nm_rke2_conf
+
+    # UPDATE NETWORK MANAGER
+    - name: Tell NetworkManager to ignore RKE2 CNI interfaces
+      ansible.builtin.copy:
+        dest: /etc/NetworkManager/conf.d/rke2-canal.conf
+        owner: root
+        group: cnadmin
+        mode: "0644"
+        content: |
+          [keyfile]
+          unmanaged-devices=interface-name:flannel*;interface-name:cali*;interface-name:tunl*;interface-name:vxlan.calico;interface-name:vxlan-v6.calico;interface-name:wireguard.cali;interface-name:wg-v6.cali
+      when: not nm_rke2_conf.stat.exists
+      become: true
+
+    # RELOAD NETWORK MANAGER
+    - name: Reload NetworkManager
+      ansible.builtin.systemd:
+        name: NetworkManager
+        state: reloaded
+      when: not nm_rke2_conf.stat.exists
+      become: true
+
+    # DISABLE FIREWALL SERVICE
+    - name: Disable and stop firewalld if present
+      ansible.builtin.systemd:
+        name: firewalld
+        enabled: no
+        state: stopped
+      when: "'firewalld.service' in ansible_facts.services"
+      become: true
+
+    # NETWORKING - REQUIRED FOR RKE2 DNSCORE
+    - name: Ensure iptables uses nft backend
+      command: alternatives --set iptables /usr/sbin/iptables-nft
+      changed_when: false
+
+    # NETWORKING - REQUIRED FOR RKE2 DNSCORE
+    - name: Check if 6443 allow rule exists
+      command: nft list table inet nftables_svc
+      register: nft_rules
+      changed_when: false
+      failed_when: false
+      
+    # NETWORKING - REQUIRED FOR RKE2 ELSE BLOCKED (CONTROL PLANE)
+    - name: Ensure nftables rules are present
+      blockinfile:
+        path: /etc/nftables/main.nft
+        marker: "# {mark} ANSIBLE RKE2 PORTS"
+        block: |
+          add rule inet nftables_svc allow tcp dport { 80, 443, 6443, 9345, 2379, 2380, 10250, 8443, 8080, 9090, 22 } accept
+
+    # NETWORKING - REQUIRED FOR RKE2 ELSE BLOCKED (NOT CONTROL PLANE)
+    - name: Persist worker TCP ports in nftables config
+      blockinfile:
+        path: /etc/nftables/main.nft
+        marker: "# {mark} ANSIBLE RKE2 WORKER PORTS"
+        block: |
+          add rule inet nftables_svc allow tcp dport { 80, 443, 10250, 8443 } accept
+      when:
+        - inventory_hostname not in control_plane_nodes
+    
+    - name: Persist required Kubernetes UDP ports in nftables config
+      blockinfile:
+        path: /etc/nftables/main.nft
+        marker: "# {mark} ANSIBLE RKE2 UDP PORTS"
+        block: |
+          add rule inet nftables_svc allow udp dport { 8472, 4789 } accept
+
+    # ENABLE BRIDGE NETFILTER
+    - name: Enable bridge netfilter for iptables
+      ansible.builtin.sysctl:
+        name: net.bridge.bridge-nf-call-iptables
+        value: '1'
+        state: present
+        reload: true
+      become: true
+
+    # ENABLE BRIDGE NETFILTER (IPv6)
+    - name: Enable bridge netfilter for ip6tables
+      ansible.builtin.sysctl:
+        name: net.bridge.bridge-nf-call-ip6tables
+        value: '1'
+        state: present
+        reload: true
+      become: true
+
+    # UPDATE IP FORWARDING
+    - name: Enable IPv4 forwarding
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+      become: true
+
+    # LOAD MODULES
+    - name: Load br_netfilter module
+      ansible.builtin.modprobe:
+        name: br_netfilter
+        state: present
+
+    # UPDATE RP FILTERS (ALL)
+    - name: Ensure rp_filter is disabled (all)
+      ansible.posix.sysctl:
+        name: net.ipv4.conf.all.rp_filter
+        value: '0'
+        state: present
+        reload: yes
+      become: true
+
+    # UPDATE RP FILTERS (DEFAULT)
+    - name: Ensure rp_filter is disabled (default)
+      ansible.posix.sysctl:
+        name: net.ipv4.conf.default.rp_filter
+        value: '0'
+        state: present
+        reload: yes
+      become: true
+
+    # UPDATE RP FILTERS ENS192
+    - name: Ensure rp_filter is disabled (default)
+      ansible.posix.sysctl:
+        name: net.ipv4.conf.ens192.rp_filter
+        value: '0'
+        state: present
+        reload: yes
+      become: true
+
+    # CREATE LOG LOCATION
+    - name: Create Rancher logs directory
+      ansible.builtin.file:
+        path: /data01/rancher/logs
+        state: directory
+        owner: cnadmin
+        group: cnadmin
+        mode: '0775'
+
+    #################################
+    # PRE-REQUIREMENTS END
+    ################################# 
+
+    # VERIFY RKE2 INSTALLATION (CONTROL PLANE ONLY)
+    - name: Check if rke2-server is installed
+      ansible.builtin.stat:
+        path: /usr/lib/systemd/system/rke2-server.service
+      register: rke2_control_plane_installed
+      when: inventory_hostname in control_plane_nodes
+
+    # VERIFY RKE2 INSTALLATION (AGENT NODES)
+    - name: Check if rke2-agent is installed
+      ansible.builtin.stat:
+        path: /usr/lib/systemd/system/rke2-agent.service
+      register: rke2_agent_installed
+      when: inventory_hostname not in control_plane_nodes
+
+    # INSTALL RKE2 (CONTROL PLANE ONLY)
+    - name: Install RKE2
+      ansible.builtin.shell: |
+        curl -sfL https://get.rke2.io | sh -
+      become: true
+      when:
+        - inventory_hostname in control_plane_nodes
+        - not rke2_control_plane_installed.stat.exists
+        
+    # INSTALL RKE2 (WORKER NODES)
+    - name: Install RKE2 Agent
+      ansible.builtin.shell: |
+        curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="agent" sh -
+      become: true
+      when:
+        - inventory_hostname not in control_plane_nodes
+        - not rke2_agent_installed.stat.exists  
+      
+    # ADD DIRECTORY ON ALL SERVERS
+    - name: Add /etc/rancher/rke2 to all servers
+      ansible.builtin.file:
+        path: /etc/rancher/rke2
+        state: directory
+        owner: "root"
+        group: "root"
+        mode: '0755'
+        recurse: yes
+      become: true
+
+    # ADD DIRECTORY ONLY IF SERVER IS NOT SERVER1
+    - name: Ensure RKE2 config directory exists
+      ansible.builtin.file:
+        path: /data01/rancher/rke2
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      when: inventory_hostname not in control_plane_nodes
+      become: true
+
+    # ADD DIRECTORY ON ALL SERVERS
+    - name: Ensure Docker image directory exists
+      ansible.builtin.file:
+        path: /data01/docker/images
+        state: directory
+        owner: cnadmin
+        group: cnadmin
+        mode: '0775'
+
+    # CONFIGURE RANCHER DATA LOCATION (CONTROL PLANE ONLY)
+    - name: Configure data directory for RKE2 on server 1
+      ansible.builtin.copy:
+        dest: /etc/rancher/rke2/config.yaml
+        owner: root
+        group: root
+        mode: '0600'
+        content: |
+          data-dir: /data01/rancher/rke2
+          write-kubeconfig-mode: "0644"
+
+          node-label:
+            - "env={{ env }}"
+            - "scope={{ rke2_scope }}"
+            - "cluster={{ rke2_cluster_name }}-{{ env }}-{{ rke2_scope }}"
+            - "platform={{ k8s_platform }}"
+      become: true
+      when: inventory_hostname in control_plane_nodes
+      
+    # UPDATE HOSTS FILE WITH LOCALHOST REQUIREMENT
+    - name: Ensure localhost entry exists in /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.0\.1\s+localhost'
+        line: '127.0.0.1 localhost'
+        state: present
+        create: yes
+    
+    # UPDATING EVERYONE'S PATH
+    - name: Add RKE2 bin to global PATH
+      ansible.builtin.copy:
+        dest: /etc/profile.d/rke2_path.sh
+        content: |
+          export PATH=$PATH:/data01/rancher/rke2/bin/
+          export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+    # UPDATE ROOT PROFILE
+    - name: Source global RKE2 profile from root bashrc
+      ansible.builtin.lineinfile:
+        path: /root/.bashrc
+        line: 'source /etc/profile.d/rke2_path.sh'
+        create: true
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+    #################################
+    # INSTALL CERT MANAGER START
+    #################################
+
+    # CREATE NAMESPACE (CONTROL PLANE ONLY)
+    - name: Create cert-manager namespace
+      ansible.builtin.command:
+        cmd: kubectl create namespace cert-manager
+      failed_when: false
+      changed_when: false
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+    # INSTALL CERT MANAGER (CONTROL PLANE ONLY)
+    - name: Install cert-manager
+      ansible.builtin.command:
+        cmd: >
+          /usr/local/bin/helm upgrade --install cert-manager jetstack/cert-manager
+          --namespace cert-manager
+          --set crds.enabled=true
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+
+    #################################
+    # INSTALL CERT MANAGER END
+    ################################# 
+
+    #################################
+    # INSTALL RANCHER START
+    ################################# 
+    
+    # CHECK NAMESPACE (CONTROL PLANE ONLY)
+    - name: Check if cattle-system namespace exists
+      ansible.builtin.command:
+        cmd: kubectl get namespace cattle-system
+      register: cattle_ns
+      failed_when: false
+      changed_when: false
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+    # CHECK HELM EXISTS (CONTROL PLANE ONLY)
+    - name: Check if Rancher Helm release exists
+      ansible.builtin.command:
+        cmd: /usr/local/bin/helm status rancher -n cattle-system
+      register: rancher_release
+      failed_when: false
+      changed_when: false
+      become: true
+      when:
+        - inventory_hostname in control_plane_nodes
+        - cattle_ns.rc == 0
+        
+
+    # CREATE NAMESPACE (CONTROL PLANE ONLY)
+    - name: Create cattle-system namespace
+      ansible.builtin.command:
+        cmd: kubectl create namespace cattle-system
+      become: true
+      when:
+        - inventory_hostname in control_plane_nodes
+        - cattle_ns.rc != 0
+
+    # COPY CA CERT FILE (CONTROL PLANE ONLY)
+    - name: Copy Rancher additional CA bundle
+      ansible.builtin.copy:
+        src: ../../files/k8s/tls-ca-additional.pem
+        dest: /tmp/tls-ca-additional.pem
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+      when:
+        - inventory_hostname in control_plane_nodes
+
+    # CREATE/APPLY RANCHER CA SECRET (CONTROL PLANE ONLY)
+    - name: Create Rancher CA secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: tls-ca
+            namespace: cattle-system
+          type: Opaque
+          data:
+            cacerts.pem: "{{ lookup('file', '../../files/k8s/tls-ca-additional.pem') | b64encode }}"
+      become: true
+      when:
+        - inventory_hostname in control_plane_nodes
+
+    # VERIFY DIRECTORY EXISTS
+    - name: Ensure RKE2 manifests directory exists
+      file:
+        path: /data01/rancher/rke2/server/manifests/
+        state: directory
+        mode: "0755"
+
+    # ADD RANCHER CONFIG FILE FOR INGRESS FORWARD HEADERS
+    - name: Configure nginx ingress forwarded headers (RKE2)
+      copy:
+        dest: /data01/rancher/rke2/server/manifests/rke2-ingress-nginx-config.yaml
+        owner: root
+        group: cnadmin
+        mode: "0644"
+        content: |
+          apiVersion: helm.cattle.io/v1
+          kind: HelmChartConfig
+          metadata:
+            name: rke2-ingress-nginx
+            namespace: kube-system
+          spec:
+            valuesContent: |-
+              controller:
+                config:
+                  use-forwarded-headers: "true"
+
+    # ADD DIRECTORY ON ALL SERVERS
+    - name: Ensure Rancher data directory exists
+      ansible.builtin.file:
+        path: /data01/rancher
+        state: directory
+        owner: root
+        group: cnadmin
+        mode: '0775'
+
+    # ALLOWING CONTROL PLANE TO BE A WORKER TOO
+    - name: Allow workloads on control plane nodes
+      ansible.builtin.shell: |
+        kubectl taint nodes {{ inventory_hostname | lower }} node-role.kubernetes.io/control-plane:NoSchedule- || true
+        kubectl taint nodes {{ inventory_hostname | lower }} node-role.kubernetes.io/master:NoSchedule- || true
+      environment:
+        KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+    # LABELING CONTROL PLANE AS WORKER IN RANCHER
+    - name: Label control plane as worker
+      ansible.builtin.shell: |
+        kubectl label node {{ inventory_hostname | lower }} node-role.kubernetes.io/worker=true --overwrite
+      environment:
+        KUBECONFIG: /etc/rancher/rke2/rke2.yaml
+      become: true
+      when: inventory_hostname in control_plane_nodes
+   
+    # RELOAD SYSTEMD (KUBE REQUIREMENT)
+    - name: Reload systemd
+      ansible.builtin.systemd: 
+        daemon_reload: true
+      become: true
+    
+    #################################
+    # INSTALL RANCHER END
+    ################################# 
+
+    # VERIFY SEMANAGE TOOLS EXIST
+    - name: Ensure semanage tools are installed
+      ansible.builtin.dnf:
+        name: policycoreutils-python-utils
+        state: present
+      become: true
+      when: ansible_facts.selinux.status == "enabled"
+
+    # VERIFY FCONTEXT FOR SELINUX
+    - name: Ensure SELinux fcontext for RKE2 data dir
+      community.general.sefcontext:
+        target: "/data01(/.*)?"
+        setype: container_file_t
+        state: present
+      become: true
+      when: ansible_facts.selinux.status == "enabled"
+
+    # ADD DATA01 FOR SELINUX
+    - name: Restore SELinux context on /data01
+      ansible.builtin.command: restorecon -RF /data01
+      register: restorecon_result
+      failed_when: false
+      changed_when: "'relabeled' in restorecon_result.stdout"
+
+    # START SERVICE (CONTROL PLANE ONLY)
+    - name: Enable and start rke2-server
+      ansible.builtin.systemd:
+        name: rke2-server
+        enabled: true
+        state: started
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+    # WAIT ON SERVICE (CONTROL PLANE ONLY)
+    - name: Wait briefly for CNI interfaces to appear
+      ansible.builtin.pause:
+        seconds: 45
+      when: inventory_hostname in control_plane_nodes
+
+    # WAIT KUBECONFIG EXISTS
+    - name: Wait for RKE2 kubeconfig
+      ansible.builtin.wait_for:
+        path: /etc/rancher/rke2/rke2.yaml
+        timeout: 300
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+    # VERIFY KUBECONFIG EXISTS
+    - name: Check RKE2 kubeconfig exists
+      ansible.builtin.stat:
+        path: /etc/rancher/rke2/rke2.yaml
+      register: rke2_kubeconfig
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+    # ADD LOCAL-PATH PROVISIONER
+    - name: Install local-path provisioner
+      ansible.builtin.command:
+        cmd: kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml
+      become: true
+      when: inventory_hostname in control_plane_nodes
+     
+    # SETUP CNADMIN USER FOR KUBE MANAGEMENT
+    - name: Ensure cnadmin kube directory exists
+      ansible.builtin.file:
+        path: /home/cnadmin/.kube
+        state: directory
+        owner: cnadmin
+        group: cnadmin
+        mode: '0700'
+      become: true
+
+    # SETUP CNADMIN USER FOR KUBE MANAGEMENT
+    - name: Copy RKE2 kubeconfig for cnadmin
+      ansible.builtin.copy:
+        src: /etc/rancher/rke2/rke2.yaml
+        dest: /home/cnadmin/.kube/config
+        owner: cnadmin
+        group: cnadmin
+        mode: '0600'
+        remote_src: true
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+    # CREATE BIN DIRECTORY
+    - name: Create cnadmin bin directory
+      ansible.builtin.file:
+        path: /root/bin/
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      become: true 
+     
+    # COPY START/STOP SCRIPT (ROOT)
+    - name: Copy managek8s.sh to root's home directory
+      copy:
+        src: ../../files/k8s/managek8s.sh
+        dest: /root/bin/managek8s.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    # CREATE BIN DIRECTORY
+    - name: Create cnadmin bin directory
+      ansible.builtin.file:
+        path: /home/cnadmin/bin/
+        state: directory
+        owner: cnadmin
+        group: cnadmin
+        mode: "0755"
+      become: true 
+
+    # COPY FILE
+    - name: Copy managek8s.sh to root's home directory
+      copy:
+        src: ../../files/k8s/managek8s.sh
+        dest: /home/cnadmin/bin/managek8s.sh
+        owner: cnadmin
+        group: cnadmin
+        mode: '0775'
+
+    # START SERVICE ON ALL OTHER SERVERS
+    - name: Enable and start rke2-server
+      ansible.builtin.systemd:
+        name: rke2-server
+        enabled: true
+        state: started
+      become: true
+      when: inventory_hostname in control_plane_nodes
+
+    # GET TOKEN FROM CONTROL PLANE (CONTROL PLANE ONLY)
+    - name: Read token from control plane
+      ansible.builtin.slurp:
+        src: /data01/rancher/rke2/server/node-token
+      register: rke2_token_raw
+      delegate_to: "{{ (control_plane_nodes | default(groups['k8s']))[0] }}"
+      run_once: true
+
+    # STORE TOKEN GLOBALLY
+    - name: Store token for all servers to see
+      ansible.builtin.set_fact:
+        rke2_token: "{{ rke2_token_raw.content | b64decode | trim }}"
+      delegate_to: localhost
+      delegate_facts: true
+      run_once: true
+
+     # CREATE CONFIG (AGENTS ONLY)
+    - name: Configure data directory for RKE2 for server2 and above
+      ansible.builtin.copy:
+        dest: /etc/rancher/rke2/config.yaml
+        owner: root
+        group: cnadmin
+        mode: '0600'
+        content: |
+          server: "https://{{ hostvars[control_plane_nodes[0]].ansible_fqdn }}:9345"
+          token: "{{ rke2_token_raw.content | b64decode | trim }}"
+          data-dir: /data01/rancher/rke2
+          write-kubeconfig-mode: "0644"
+      when: inventory_hostname not in control_plane_nodes
+
+    # START SERVICE (AGENT NODES)
+    - name: Enable and start rke2-agent
+      ansible.builtin.systemd:
+        name: rke2-agent
+        enabled: true
+        state: started
+      become: true
+      when: inventory_hostname not in control_plane_nodes
+    
+    # ADDING REPO
+    - name: Add Argo Helm repo
+      ansible.builtin.command:
+        cmd: /usr/local/bin/helm repo add argo https://argoproj.github.io/argo-helm
+      register: argo_repo
+      failed_when: false
+      changed_when: "'already exists' not in (argo_repo.stderr | default(''))"
+      become: true
+      when: inventory_hostname == control_plane_nodes[0]
+
+    # ADD CNADMIN/BIN TO PATH
+    - name: Add ~/bin to cnadmin PATH
+      ansible.builtin.lineinfile:
+        path: /home/cnadmin/.bashrc
+        line: 'export PATH="$HOME/bin:$PATH"'
+        create: true
+        owner: cnadmin
+        group: cnadmin
+        mode: "0644"
+      become: true
+
+    # SETTING GROUP ACLS
+    - name: Set ACL for RKE2 admin paths only
+      ansible.posix.acl:
+        path: "{{ item }}"
+        entity: cnadmin
+        etype: group
+        permissions: rx
+        recursive: true
+        state: present
+      loop:
+        - /data01/rancher/rke2/server
+        - /data01/rancher/rke2/agent/etc
+        - /data01/rancher/rke2/agent/logs
+      become: true
+
+    # MAKING ACLS DEFAULED
+    - name: Set default ACL for RKE2 admin paths
+      ansible.posix.acl:
+        path: "{{ item }}"
+        entity: cnadmin
+        etype: group
+        permissions: rx
+        default: true
+        recursive: true
+        state: present
+      loop:
+        - /data01/rancher/rke2/server
+        - /data01/rancher/rke2/agent/etc
+        - /data01/rancher/rke2/agent/logs
+      become: true
+
+    #################################
+    # INSTALL DYNATRACE
+    #################################
+    # DO NOT INSTALL ON KUBERNETES CLUSTER!
+
+    

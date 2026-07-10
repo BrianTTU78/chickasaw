@@ -1,0 +1,11 @@
+[project]
+name = "cn-ecs-ansible"
+version = "0.1.0"
+description = "Ansible playbooks and roles for CN ECS"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ansible-core>=2.20,<3",
+    "molecule>=25,<26",
+    "molecule-plugins[podman]>=25.8,<26"
+]

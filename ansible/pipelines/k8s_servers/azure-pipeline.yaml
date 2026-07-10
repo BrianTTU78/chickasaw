@@ -1,0 +1,28 @@
+# REPO: cn_ecs_ansible
+# PIPELINE: pipelines/k8s_ansible_pipeline.yaml
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger:
+  branches:
+    include:
+      - main
+
+  paths:
+    include:
+      - playbooks/k8s_servers/**
+      - files/k8s/**
+
+resources:
+  repositories:
+    - repository: shared_pipelines
+      type: git
+      name: cn_ecs_shared_pipelines
+
+extends:
+  template: shared_main_ansible_kube_pipeline.yaml@shared_pipelines
+  parameters:
+    playbook_folder: k8s_servers
+    deploy_dev: yes
+    deploy_test: yes
+    deploy_stage: yes
+    deploy_prod: yes

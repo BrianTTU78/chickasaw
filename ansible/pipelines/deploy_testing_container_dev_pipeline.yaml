@@ -1,0 +1,47 @@
+# Repo: cn_ecs_ansible 
+# Pipeline: deploy_testing_container_dev_pipeline.yaml
+
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger: none
+pr: none
+
+parameters:
+- name: ADO_CONTAINER_IMAGE
+  displayName: Docker Container Name
+  type: string
+  default: ado-agent-linux-testing:1.0.9
+
+variables:
+  - group: cn_pipelines_common
+
+stages:
+- stage: DockerDeployDev
+  displayName: 'Dev Deploy'
+
+  variables:
+  - group: cn_pipelines_common
+ 
+  pool:
+    name: ADA-ECS-DEV
+
+  jobs:
+  - job: DockerDeployJob
+    displayName: Deploy DEV
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+
+    steps:
+    - checkout: self
+
+    - task: Bash@3
+      name: DockerDeploy
+      displayName: Deploy 
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/ado_agent_testing_containers/"
+        script: |
+          echo "INFO: Using Docker Image: ${ADO_CONTAINER_IMAGE}"
+          ansible-playbook playbook.yml -i ../../inventories/dev -e "@../../group_vars/dev.yml" -e "ADO_PAT=${ADO_PAT}" -e "ADO_CONTAINER_IMAGE=${ADO_CONTAINER_IMAGE}"
+      env:
+        ADO_PAT: $(ADO_PAT)
+        ADO_CONTAINER_IMAGE: ${{ parameters.ADO_CONTAINER_IMAGE }}

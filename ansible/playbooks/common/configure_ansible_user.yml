@@ -1,0 +1,64 @@
+---
+# COPY COMMON BASH_PROFILE FROM FILES
+- name: Copy .bash_profile
+  copy:
+    src: ../../files/common/.bash_profile
+    dest: "/home/ansible/.bash_profile"
+    owner: "ansible"
+    group: "ansible"
+    mode: '0644'
+
+# CHECK BANNER EXISTS YET
+- name: Check if banner file exists
+  stat:
+    path: "/home/ansible/.bash_banner"
+  register: banner
+
+# CHECK ALIASES EXISTS YET
+- name: Check if the aliases file exists
+  stat:
+    path: "/home/ansible/.bash_banner"
+  register: aliases
+
+# MAKE BANNER
+- name: Generate figlet banner for the hostname
+  command: "figlet {{ ansible_hostname }}"
+  register: figlet_output
+
+# SAVE BANNER TO FILE (ANSIBLE)
+- name: Save figlet banner to file
+  copy:
+    dest: "/home/ansible/.bash_banner"
+    content: "{{ figlet_output.stdout }}"
+    owner: ansible
+    group: ansible
+    mode: '0644'
+  when: figlet_output is defined
+
+# ADD LINE TO BANNER
+- name: Add Line to Banner
+  lineinfile:
+    path: "/home/ansible/.bash_banner"
+    line: "You are now ansible user ..."
+    state: present
+
+# CREATE COMMON ALIASES
+- name: Create .bash_aliases
+  file:
+    path: "/home/ansible/.bash_aliases"
+    state: touch
+    owner: "ansible"
+    group: "ansible"
+    mode: '0644'
+  when: not aliases.stat.exists
+
+# Add pywinrm to ansible so it can connect to windows servers
+- name: Install pywinrm for ansible user only
+  pip:
+    name:
+      - pywinrm
+    executable: pip3
+    extra_args: "--user"
+  become: yes
+  become_user: ansible
+  when: inventory_hostname == "ADAVPRDADO01"

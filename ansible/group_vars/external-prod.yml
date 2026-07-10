@@ -1,0 +1,6 @@
+---
+################
+# RKE2
+################
+control_plane_nodes: ["ADAVDMZPRDK8S01"]
+rke2_scope: internal

@@ -1,0 +1,348 @@
+---
+- name: Setup MongoDB Servers
+  hosts: mongodb
+  become: true
+  gather_facts: true
+  tasks:
+    # Installing Company Certs
+    - import_tasks: ../common/install_corporate_certs.yml
+    # Installing Default OS Packages
+    - import_tasks: ../common/install_rhel_packages.yml
+    # Importing common configure_ansible playbook
+    - import_tasks: ../common/configure_ansible_user.yml
+    # Import Application Package Requirements
+    - import_tasks: packages.yml
+    # Create Admin User
+    - import_tasks: ../common/configure_cnadmin_user.yml
+      vars:
+        cn_admin_user: cnadmin
+
+    # GET IP ADDRESS OF SERVER
+    - name: Get the primary IP address of the server
+      ansible.builtin.set_fact:
+        server_ip: "{{ ansible_default_ipv4.address }}"
+  
+    # Create Alias for stopping mongodb
+    - name: Add Start and Stop alias to .bash_aliases
+      block:
+        - lineinfile:
+            path: /home/{{ cn_admin_user }}/.bash_aliases
+            line: 'alias mdbstop="sudo systemctl stop mongod; sleep 2; sudo systemctl status mongod"'
+            create: yes
+            state: present
+
+        - lineinfile:
+            path: /home/{{ cn_admin_user }}/.bash_aliases
+            line: 'alias mdbstart="sudo systemctl start mongod; sleep 2; sudo systemctl status mongod"'
+            create: yes
+            state: present
+
+        - lineinfile:
+            path: "/home/{{ cn_admin_user }}/.aliases_output"
+            line: "mdbstart = Start MongoDB Service."
+            state: present
+
+        - lineinfile:
+            path: "/home/{{ cn_admin_user }}/.aliases_output"
+            line: "mdbstop = Stop MongoDB Service."
+            state: present
+
+    # ADD CNADMIN TO MONGOD GROUP
+    - name: Add cnadmin user to mongod group
+      ansible.builtin.user:
+        name: "{{ cn_admin_user }}"
+        groups: mongod
+        append: yes
+      become: true
+
+      # ADD CNADMIN TO MONGOD GROUP
+    - name: Add mongod user to cnadmin group
+      ansible.builtin.user:
+        name: mongod
+        groups: "{{ cn_admin_user }}"
+        append: yes
+      become: true
+    
+    # SET /DATA01 PERMISSIONS
+    - name: Set ownership and permissions on MongoDB data directory
+      file:
+        path: /data01
+        state: directory
+        owner: mongod
+        group: mongod
+        mode: '0775'
+
+    # CREATE DATA LOCATION
+    - name: Create MongoDB database directory
+      file:
+        path: /data01/mongodb
+        state: directory
+        owner: mongod
+        group: mongod
+        mode: '0775'
+
+    # CREATE LOG LOCATION
+    - name: Create MongoDB log directory
+      file:
+        path: /data01/mongodb/logs
+        state: directory
+        owner: mongod
+        group: mongod
+        mode: '0775'
+
+    # CREATE LOG LOCATION
+    - name: Create MongoDB data directory
+      file:
+        path: /data01/mongodb/data
+        state: directory
+        owner: mongod
+        group: mongod
+        mode: '0775'
+
+    # COPY BASE MONGOD.CONF 
+    - name: Copy Base MongoDB conf
+      ansible.builtin.copy:
+        src: ../../files/mongodb/mongod.conf
+        dest: /etc/mongod.conf
+        mode: '0644' 
+        owner: root 
+        group: root
+        force: yes
+
+    # UPDATE IP BINDING
+    - name: Update bindIp in mongod.conf for all replica set members
+      ansible.builtin.lineinfile:
+        path: /etc/mongod.conf
+        regexp: '^\s*bindIp:'
+        line: "  bindIp: 127.0.0.1,{{ server_ip }}"
+        insertafter: '^net:'
+      become: true
+
+    # COPY KEY FILE
+    - name: Copy Keyfile
+      ansible.builtin.copy:
+        src: ../../files/mongodb/mongodb_{{ env }}_keyfile
+        dest: /etc/mongodb_keyfile
+        mode: '0400'
+        owner: mongod
+        group: mongod
+        force: yes
+      when: env in ['stage', 'prod']
+
+    # ADD CONFIG IF STAGE OR PROD
+    - name: Add MongoDB keyFile after authorization
+      ansible.builtin.lineinfile:
+        path: /etc/mongod.conf
+        insertafter: 'authorization:\s*"enabled"'
+        line: '  keyFile: /etc/mongodb_keyfile'
+        state: present
+      when: env in ['stage', 'prod']
+
+    # CREATE LOG FILE
+    - name: Create Log File
+      ansible.builtin.file:
+        path: /data01/mongodb/logs/mongod.log
+        state: touch
+        owner: mongod
+        group: mongod
+        mode: '0664'
+      become: true
+
+    - name: Ensure replication block is present (prod only)
+      blockinfile:
+        path: /etc/mongod.conf
+        marker: "# {mark} ANSIBLE MANAGED REPLICATION BLOCK"
+        insertafter: EOF
+        block: |
+          replication:
+            replSetName: "rsProd"
+      when: env == "prod"
+
+    ##############################
+    # SET SELINUX START 
+    ##############################
+    - name: Ensure SELinux tools are present
+      ansible.builtin.package:
+        name:
+          - policycoreutils-python-utils
+        state: present
+      become: true
+
+    - name: Ensure MongoDB data directory SELinux mapping exists
+      community.general.sefcontext:
+        target: '/data01/mongodb/data(/.*)?'
+        setype: mongod_var_lib_t
+        state: present
+      become: true
+
+    - name: Ensure MongoDB log directory SELinux mapping exists
+      community.general.sefcontext:
+        target: '/data01/mongodb/logs(/.*)?'
+        setype: mongod_log_t
+        state: present
+      become: true
+    
+    - name: Ensure MongoDB keyfile SELinux mapping exists
+      community.general.sefcontext:
+        target: '/etc/mongodb_keyfile'
+        setype: etc_t
+        state: present
+      become: true
+      when:
+        - env == "prod"
+        - mongodb_keyfile is defined
+        - mongodb_keyfile.stat.exists
+    
+    - name: Apply SELinux labels to MongoDB paths
+      ansible.builtin.command: restorecon -Rv /data01/mongodb /etc/mongodb_keyfile
+      become: true
+      changed_when: false
+      when:
+        - env == "prod"
+        - mongodb_keyfile is defined
+        - mongodb_keyfile.stat.exists
+    
+    - name: Apply SELinux labels to MongoDB paths when no keyfile
+      ansible.builtin.command: restorecon -Rv /data01/mongodb
+      become: true
+      changed_when: false
+      when: not (
+              env == "prod" and
+              mongodb_keyfile is defined and
+              mongodb_keyfile.stat.exists
+            )
+    
+    - name: Ensure SELinux allows MongoDB on port 27017
+      community.general.seport:
+        ports: 27017
+        proto: tcp
+        setype: mongod_port_t
+        state: present
+      become: true
+
+    # FIREWALL STANDARDIZATION
+
+    - name: Get current default firewalld zone
+      ansible.builtin.command:
+        cmd: firewall-cmd --get-default-zone
+      register: current_zone
+      become: true
+      changed_when: false
+
+    - name: Set default zone to public
+      ansible.builtin.command:
+        cmd: firewall-cmd --set-default-zone=public
+      become: true
+      when: current_zone.stdout != 'public'
+      notify: reload firewalld
+
+    - name: Get current zone for ens192
+      ansible.builtin.command:
+        cmd: firewall-cmd --get-zone-of-interface=ens192
+      register: iface_zone
+      become: true
+      failed_when: false
+      changed_when: false
+
+    - name: Assign ens192 to public zone
+      ansible.posix.firewalld:
+        zone: public
+        interface: ens192
+        permanent: true
+        state: enabled
+      become: true
+      when: iface_zone.stdout != 'public'
+      notify: reload firewalld
+
+    - name: Remove unwanted services from public zone
+      ansible.builtin.shell: |
+        for svc in dns http https kerberos ldap ntp; do
+          firewall-cmd --zone=public --query-service=$svc --permanent && \
+          firewall-cmd --zone=public --remove-service=$svc --permanent || true
+        done
+      become: true
+      register: svc_result
+      changed_when: "'success' in svc_result.stdout"
+      notify: reload firewalld
+
+    - name: Remove unwanted ports from public zone
+      ansible.builtin.shell: |
+        for port in 1433/tcp 135/tcp 139/tcp 445/tcp 137-138/udp 49152-65535/tcp 17778/tcp 17790/tcp 8000/tcp 8080/tcp 8089/tcp; do
+          firewall-cmd --zone=public --query-port=$port --permanent && \
+          firewall-cmd --zone=public --remove-port=$port --permanent || true
+        done
+      become: true
+      register: port_remove_result
+      changed_when: "'success' in port_remove_result.stdout"
+      notify: reload firewalld
+
+    - name: Open required ports in public zone
+      ansible.builtin.shell: |
+        firewall-cmd --zone=public --add-port=27017/tcp --permanent
+        firewall-cmd --zone=public --add-port=8834/tcp --permanent
+        firewall-cmd --zone=public --add-port=8834/udp --permanent
+        firewall-cmd --zone=public --add-port=4118-4123/tcp --permanent
+        firewall-cmd --zone=public --add-port=4118-4123/udp --permanent
+        firewall-cmd --zone=public --add-port=9997-9998/tcp --permanent
+        firewall-cmd --zone=public --add-port=9997-9998/udp --permanent
+        firewall-cmd --zone=public --add-port=464/tcp --permanent
+        firewall-cmd --zone=public --add-port=464/udp --permanent
+        firewall-cmd --zone=public --add-port=636/tcp --permanent
+        firewall-cmd --zone=public --add-port=3268-3269/tcp --permanent
+        firewall-cmd --zone=public --add-port=9389/tcp --permanent
+      become: true
+      register: port_result
+      failed_when: "'Error' in port_result.stderr"
+      changed_when: port_result.stdout is search('success') and 'ALREADY_ENABLED' not in port_result.stderr
+      notify: reload firewalld
+
+    - name: Verify 27017 is open
+      ansible.builtin.shell: firewall-cmd --list-ports | grep 27017
+      become: true
+      register: verify_ports
+      failed_when: verify_ports.rc != 0
+      changed_when: false
+
+    - name: Check if nftables_svc table exists
+      ansible.builtin.command:
+        cmd: nft list table inet nftables_svc
+      register: nft_table_check
+      become: true
+      failed_when: false
+      changed_when: false
+
+    - name: Remove nftables_svc table
+      ansible.builtin.command:
+        cmd: nft delete table inet nftables_svc
+      become: true
+      when: nft_table_check.rc == 0
+
+    - name: Disable standalone nftables service
+      ansible.builtin.systemd:
+        name: nftables
+        enabled: false
+        state: stopped
+      become: true
+      ignore_errors: true
+
+    - name: Persist firewalld rules
+      ansible.builtin.command:
+        cmd: firewall-cmd --runtime-to-permanent
+      become: true
+      changed_when: false
+    
+    - name: Start and enable mongod
+      ansible.builtin.systemd:
+        name: mongod
+        state: started
+        enabled: true
+      become: true
+
+    # Installing Dynatrace Agent
+    - import_tasks: ../common/install_dynatrace_agent.yml
+
+  handlers:
+    - name: reload firewalld
+      ansible.builtin.command:
+        cmd: firewall-cmd --reload
+      become: true

@@ -1,0 +1,365 @@
+---
+- name: Setup Registry Servers
+  hosts: registry
+  become: yes
+  gather_facts: true
+
+  tasks:
+    # 1. PRE-REQUISITES & CORPORATE CONFIG
+    - import_tasks: ../common/install_corporate_certs.yml
+    - import_tasks: ../common/install_rhel_packages.yml
+    - import_tasks: ../common/configure_ansible_user.yml
+    - import_tasks: packages.yml
+    - import_tasks: ../common/configure_cnadmin_user.yml
+      vars:
+        cn_admin_user: cnadmin
+
+    # 2. CONVENIENCE ALIASES
+    - name: Add Artifactory Aliases
+      blockinfile:
+        path: /home/cnadmin/.bash_aliases
+        create: yes
+        block: |
+          alias list='cat /home/cnadmin/.aliases_output'
+          alias artstart='sudo systemctl start artifactory'
+          alias artstop='sudo systemctl stop artifactory'
+          alias artaccess='sudo -u artifactory tail -f /data01/artifactory/var/log/access-service.log'
+          alias artrouter='sudo -u artifactory tail -f /data01/artifactory/var/log/router-service.log'
+          alias artconsole='sudo -u artifactory tail -f /data01/artifactory/var/log/console.log'
+
+    # CREATE ARTIFACTORY USER
+    - name: Create service users
+      ansible.builtin.user:
+        name: "{{ item.name }}"
+        shell: /bin/bash
+        home: "{{ item.home | default(omit) }}"
+        create_home: "{{ item.create_home | default('no') }}"
+        system: yes
+      loop:
+        - { name: 'artifactory', home: '/data01/artifactory', create_home: 'yes' }
+        - { name: 'postgres' }
+
+    # ADD CNADMIN TO ARTIFACTORY GROUP
+    - name: Add cnadmin to artifactory group
+      ansible.builtin.user:
+        name: cnadmin
+        groups: artifactory
+        append: yes
+
+    # DOWNLOAD & UNPACK ARTIFACTORY
+    - name: Download JFrog Artifactory Pro
+      get_url:
+        url: "https://releases.jfrog.io/artifactory/artifactory-pro/org/artifactory/pro/jfrog-artifactory-pro/7.133.10/jfrog-artifactory-pro-7.133.10-linux.tar.gz"
+        dest: "/data01/jfrog-artifactory-pro-7.133.10-linux.tar.gz"
+        mode: '0644'
+        validate_certs: no
+
+    # UNPACK TAR FILE
+    - name: Unpack Artifactory Archive
+      unarchive:
+        src: "/data01/jfrog-artifactory-pro-7.133.10-linux.tar.gz"
+        dest: "/data01"
+        remote_src: yes
+        creates: /data01/artifactory-pro-7.133.10
+
+    # CREATE SYMLINKS
+    - name: Create Version-Agnostic SymLinks
+      file:
+        src: "/data01/artifactory-pro-7.133.10/{{ item }}"
+        dest: "/data01/artifactory/{{ item }}"
+        state: link
+      loop: [var, app]
+
+    # POSTGRESQL INSTALLATION
+    - name: Install PostgreSQL Server Packages
+      ansible.builtin.dnf:
+        name: 
+          - postgresql-server
+          - postgresql-contrib
+          - policycoreutils-python-utils
+        state: present
+
+    # DIRECTORY STRUCTURE & OWNERSHIPS
+    - name: Initialize Directory Structure
+      file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.owner }}"
+        mode: "{{ item.mode | default('0750') }}"
+      loop:
+        - { path: '/data01', owner: 'root', mode: '0775' }
+        - { path: '/data01/pgsql', owner: 'postgres' }
+        - { path: '/data01/pgsql/data', owner: 'postgres', mode: '0700' }
+        - { path: '/data01/pgsql/logs', owner: 'postgres', mode: '0700' }
+        - { path: '/data01/db_backup', owner: 'postgres', mode: '0700' }
+        - { path: '/data01/files/d365', owner: 'cnadmin', mode: '0755' }
+
+    # SET PERMISSIONS & OWNERSHIP
+    - name: Set Artifactory permissions and ownership
+      file:
+        path: "{{ item }}"
+        owner: artifactory
+        group: artifactory
+        mode: "0775"
+        recurse: yes
+      loop:
+        - /data01/artifactory-pro-7.133.10
+        - /data01/artifactory
+
+    # SELINUX RULES
+    - name: Configure SELinux file contexts
+      community.general.sefcontext:
+        target: "{{ item.target }}"
+        setype: "{{ item.setype }}"
+        state: present
+      loop:
+        - { target: '/data01(/.*)?', setype: 'var_t' }
+        - { target: '/data01/pgsql/data(/.*)?', setype: 'postgresql_db_t' }
+        - { target: '/data01/artifactory(/.*)?', setype: 'var_lib_t' }
+        - { target: '/data01/artifactory/var/log(/.*)?', setype: 'var_log_t' }
+        - { target: '/data01/artifactory-pro-7.133.10(/.*)?', setype: 'var_lib_t' }
+        - { target: '/data01/artifactory-pro-7.133.10/app/bin(/.*)?', setype: 'bin_t' }
+        - { target: '/data01/artifactory/app/bin(/.*)?', setype: 'bin_t' }
+
+    # APPLY SELINUX LABELS
+    - name: Apply SELinux labels
+      ansible.builtin.command: restorecon -Rv {{ item }}
+      loop:
+        - /data01
+        - /data01/pgsql/data
+        - /data01/artifactory
+        - /data01/artifactory/var/log
+      changed_when: false
+    
+    # OPEN FIREWALL PORTS
+    - name: Open firewall
+      shell: |
+        firewall-cmd --permanent --add-port=8081/tcp
+        firewall-cmd --permanent --add-port=8082/tcp
+        firewall-cmd --permanent --add-port=8046/tcp
+        firewall-cmd --permanent --add-port=5432/tcp
+        setsebool -P daemons_enable_cluster_mode on
+        setsebool -P domain_can_mmap_files 1
+        setsebool -P nis_enabled 1
+        firewall-cmd --reload
+
+    # DATABASE INITIALIZATION & VALIDATION
+    - name: Create postgresql systemd override directory
+      file:
+        path: /etc/systemd/system/postgresql.service.d
+        state: directory
+        mode: '0755'
+
+    - name: Point Postgres to Custom Data Path
+      copy:
+        dest: /etc/systemd/system/postgresql.service.d/override.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Service]
+          Environment=PGDATA=/data01/pgsql/data
+
+    # CHECK TO SEE IF INITALIZED
+    - name: Check if PostgreSQL is initialized
+      ansible.builtin.stat:
+        path: /data01/pgsql/data/PG_VERSION
+      register: pgdata_init
+    
+    # INITALIZE POSTGESS
+    - name: Initialize PostgreSQL
+      ansible.builtin.command: /usr/bin/postgresql-setup --initdb
+      environment:
+        PGDATA: /data01/pgsql/data
+      when: not pgdata_init.stat.exists
+
+    # START POSTGRESSQL
+    - name: Start PostgreSQL Service
+      systemd:
+        name: postgresql
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    # ARTIFACTORY SERVICE INSTALLATION
+    - name: Run Original Artifactory Service Installer
+      ansible.builtin.command: /data01/artifactory/app/bin/installService.sh
+      environment:
+        JFROG_HOME: /data01/artifactory
+
+    - name: Replace Artifactory systemd service with known-good unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/artifactory.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=JFrog Artifactory
+          After=network.target postgresql.service
+          Requires=postgresql.service
+
+          [Service]
+          Type=forking
+          User=artifactory
+          Group=artifactory
+
+          Environment="JF_PRODUCT_HOME=/data01/artifactory"
+          Environment="JF_ARTIFACTORY_USER=artifactory"
+          Environment="JF_ARTIFACTORY_PID=/data01/artifactory/var/work/run/artifactory.pid"
+          Environment="JF_SYSTEM_YAML=/data01/artifactory/var/etc/system.yaml"
+
+          ExecStart=/data01/artifactory/app/bin/artifactory.sh start
+          ExecStop=/data01/artifactory/app/bin/artifactory.sh stop
+
+          LimitNOFILE=65535
+          LimitNPROC=65535
+          Restart=on-failure
+          RestartSec=60
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Reload systemd
+
+    - name: Remove Artifactory systemd override file
+      ansible.builtin.file:
+        path: /etc/systemd/system/artifactory.service.d/override.conf
+        state: absent
+      notify: Reload systemd
+
+    # ENSURE LOCATION EXISTS
+    - name: Ensure security directory exists
+      ansible.builtin.file:
+        path: /data01/artifactory/var/etc/security
+        state: directory
+        owner: artifactory
+        group: artifactory
+        mode: '0755'
+
+    # GET LIST OF LOG FILES
+    - name: Set log file permissions to 664
+      ansible.builtin.find:
+        paths: /data01/artifactory/var/log
+        file_type: file
+      register: log_files
+
+    # UPGRADE LOG PERMISSIONS
+    - name: Apply 664 permissions to log files
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        mode: '0664'
+      loop: "{{ log_files.files }}"
+
+    # VALIDATE IT DOESN'T ALREADY EXIST
+    - name: Check if master.key exists
+      ansible.builtin.stat:
+        path: /data01/artifactory/var/etc/security/master.key
+      register: master_key_stat
+
+    # GENERATE MASTER.KEY
+    - name: Generate master.key if it does not exist
+      ansible.builtin.command: openssl rand -hex 32
+      register: master_key
+      changed_when: true
+      when: not master_key_stat.stat.exists
+
+    # INSTALL MASTER KEY
+    - name: Write master.key
+      ansible.builtin.copy:
+        content: "{{ master_key.stdout }}"
+        dest: /data01/artifactory/var/etc/security/master.key
+        owner: artifactory
+        group: artifactory
+        mode: '0600'
+      when: not master_key_stat.stat.exists
+
+    # VALIDATE JOIN KEY DOESN'T EXIST
+    - name: Check if join.key exists
+      ansible.builtin.stat:
+        path: /data01/artifactory/var/etc/security/join.key
+      register: join_key_stat
+
+    # GENERATE JOIN KEY
+    - name: Generate join key
+      ansible.builtin.command: openssl rand -hex 32
+      register: join_key
+      when: not join_key_stat.stat.exists
+
+    # INSTALL JOIN KEY
+    - name: Create join.key file
+      ansible.builtin.copy:
+        content: "{{ join_key.stdout }}"
+        dest: /data01/artifactory/var/etc/security/join.key
+        owner: artifactory
+        group: artifactory
+        mode: '0600'
+      when: not join_key_stat.stat.exists
+
+    # COPY SYSTEM.YAML
+    - name: Copy Artifactory system.yaml
+      ansible.builtin.copy:
+        src: ../../files/artifactory/system.yaml
+        dest: /data01/artifactory/var/etc/system.yaml
+        owner: artifactory
+        group: artifactory
+        mode: '0644'
+
+    # COPY MANAGEART.SH
+    - name: Copy manageArt.sh to cnadmin home
+      ansible.builtin.copy:
+        src: ../../files/artifactory/manageArt.sh
+        dest: /home/cnadmin/manageArt.sh
+        owner: cnadmin
+        group: cnadmin
+        mode: '0755'
+
+    # VERIFY PORTS
+    - name: Get current allowed ports
+      ansible.builtin.command: nft list set inet nftables_svc allowed_tcp_dports
+      register: nft_ports
+      changed_when: false
+      failed_when: false
+
+    # ADD PORTS
+    - name: Ensure required ports are allowed
+      ansible.builtin.command: >
+        nft add element inet nftables_svc allowed_tcp_dports { {{ item }} }
+      loop:
+        - 8081
+        - 8082
+      when: nft_ports.stdout is not search(item | string)
+      register: add_ports
+      changed_when: "'File exists' not in add_ports.stderr"
+      failed_when: false
+    
+    # START & VALIDATE ARTIFACTORY
+    - name: Start Artifactory Service
+      systemd:
+        name: artifactory
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+
+    # WAIT FOR STARTUP
+    - name: Wait for Artifactory to respond on port 8081
+      wait_for:
+        port: 8081
+        delay: 15
+        timeout: 300
+
+    # VALIDATE ROUTER IS UP
+    - name: Validate Artifactory Router Health (Port 8082)
+      ansible.builtin.uri:
+        url: "http://localhost:8082/router/api/v1/system/health"
+        method: GET
+        status_code: 200
+      register: artifactory_health
+      until: artifactory_health.status == 200
+      retries: 20
+      delay: 10
+
+  handlers:
+  - name: Reload systemd
+    ansible.builtin.systemd:
+      daemon_reload: true

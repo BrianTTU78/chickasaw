@@ -1,0 +1,120 @@
+---
+
+# INSTALL PYTHON WITH PIP3
+- name: Install pip
+  ansible.builtin.dnf:
+    name: python3-pip
+    state: present
+  become: true
+
+# INSTALL KUBERNETES PYTHON LIBS
+- name: Install Kubernetes Python library
+  ansible.builtin.pip:
+    name:
+      - kubernetes
+      - openshift
+      - PyYAML
+    executable: pip3
+  become: true
+
+# CHECK IF HELM EXISTS
+- name: Check if Helm is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/helm
+  register: helm_binary
+
+# DOWNLOAD HELM
+- name: Download Helm tarball
+  ansible.builtin.get_url:
+    url: https://get.helm.sh/helm-v{{ helm_version }}-linux-amd64.tar.gz
+    dest: /tmp/helm.tar.gz
+    mode: '0644'
+  when: not helm_binary.stat.exists
+
+# EXTRACT HELM FILES
+- name: Extract Helm
+  ansible.builtin.unarchive:
+    src: /tmp/helm.tar.gz
+    dest: /tmp
+    remote_src: true
+  when: not helm_binary.stat.exists
+
+# INSTALL HELM
+- name: Install Helm binary
+  ansible.builtin.command:
+    cmd: install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+  args:
+    creates: /usr/local/bin/helm
+  when: not helm_binary.stat.exists
+
+# CLEANUP HELM INSTALL FILES
+- name: Remove Helm tarball
+  ansible.builtin.file:
+    path: /tmp/helm.tar.gz
+    state: absent
+  when: not helm_binary.stat.exists
+
+# CLEANUP HELM INSTALL FILES
+- name: Remove extracted Helm directory
+  ansible.builtin.file:
+    path: /tmp/linux-amd64
+    state: absent
+  when: not helm_binary.stat.exists
+
+# ADD CERT MANAGER REPO
+- name: Add Jetstack Helm repo
+  kubernetes.core.helm_repository:
+    name: jetstack
+    repo_url: https://charts.jetstack.io
+    binary_path: /usr/local/bin/helm
+
+# ADD RANCHER REPO
+- name: Add Rancher Helm repo
+  kubernetes.core.helm_repository:
+    name: rancher-latest
+    repo_url: https://releases.rancher.com/server-charts/latest
+    binary_path: /usr/local/bin/helm
+
+# ADD RANCHER REPO
+- name: Configure Rancher RKE2 yum repo
+  ansible.builtin.copy:
+    dest: /etc/yum.repos.d/rancher-rke2.repo
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [rancher-rke2-common-{{ rke2_channel }}]
+      name=Rancher RKE2 Common ({{ rke2_channel }})
+      baseurl=https://rpm.rancher.io/rke2/{{ rke2_channel }}/common/centos/9/noarch
+      enabled=1
+      gpgcheck=1
+      repo_gpgcheck=1
+      gpgkey=https://rpm.rancher.io/public.key
+
+      [rancher-rke2-{{ rke2_version }}-{{ rke2_channel }}]
+      name=Rancher RKE2 {{ rke2_version }} ({{ rke2_channel }})
+      baseurl=https://rpm.rancher.io/rke2/{{ rke2_channel }}/{{ rke2_version }}/centos/9/x86_64
+      enabled=1
+      gpgcheck=1
+      repo_gpgcheck=1
+      gpgkey=https://rpm.rancher.io/public.key
+  become: true
+
+- name: Refresh dnf metadata
+  ansible.builtin.command: dnf makecache
+  become: true
+  changed_when: false
+
+# RKE2 REQUIREMENT
+- name: Install rke2-selinux with yum
+  ansible.builtin.yum:
+    name: rke2-selinux
+    state: present
+  become: true
+
+# INSTALL ARGOCD CLI
+- name: Install ArgoCD CLI
+  ansible.builtin.get_url:
+    url: https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+    dest: /usr/local/bin/argocd
+    mode: '0755'

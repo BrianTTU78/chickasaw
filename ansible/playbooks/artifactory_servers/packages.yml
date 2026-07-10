@@ -1,0 +1,19 @@
+# YUM INSTALL PACKAGES
+- name: Install prerequisites for artifactory
+  yum:
+    name:
+      - python3-devel
+      - libpq-devel
+      - "@Development tools"
+      - java-21-openjdk-devel
+      - python3-psycopg2
+      - npm
+    state: present
+
+# INSTALL PIP3 REQUIREMENTS
+- name: Install psycopg2 via pip3
+  ansible.builtin.pip:
+    name: psycopg2
+    executable: pip3
+    state: present
+

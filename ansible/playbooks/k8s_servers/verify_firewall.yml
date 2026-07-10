@@ -1,0 +1,11 @@
+---
+
+- name: Verify RKE2 firewall (firewalld) on Kubernetes hosts
+  hosts: kubernetes
+  become: true
+  vars:
+    # Must match the CNI used when the role was applied (from group_vars or role default).
+    rke2_firewall_cni: "{{ rke2_firewall_cni | default('canal') }}"
+  tasks:
+    - name: Include k8s firewall verification tasks
+      ansible.builtin.include_tasks: ../../roles/k8s/tasks/verify_firewall.yml

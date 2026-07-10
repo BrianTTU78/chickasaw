@@ -1,0 +1,28 @@
+# REPO: cn_ecs_ansible
+# PIPELINE: pipelines/artifactory_ansible_pipeline.yaml
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger:
+  branches:
+    include:
+      - main
+
+  paths:
+    include:
+      - playbooks/artifactory_servers/**
+      - files/artifactory/**
+
+resources:
+  repositories:
+    - repository: shared_pipelines
+      type: git
+      name: cn_ecs_shared_pipelines
+
+extends:
+  template: shared_main_ansible_vm_pipeline.yaml@shared_pipelines
+  parameters:
+    playbook_folder: artifactory_servers
+    deploy_dev: no
+    deploy_test: no
+    deploy_stage: no
+    deploy_prod: yes

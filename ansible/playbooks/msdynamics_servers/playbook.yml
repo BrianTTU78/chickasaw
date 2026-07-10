@@ -1,0 +1,47 @@
+---
+# Main Playbook details to setup Dynamic 365 on Web Servers
+- name: D365 Web Setup
+  hosts: web
+
+  vars:
+    artifactory_host: ADAVPRDREG01.int.chickasaw.net
+    # Variables control if files should be downloaded
+    download_frontend_xml: false
+    download_iso: false
+    download_crm_updates: false
+    download_email_router: false
+    download_scripts: false
+    download_srs_fix: false
+    download_live_id: false
+
+  tasks:
+    - import_tasks: ../common/install_corporate_certs.yml
+    - import_tasks: web_playbook.yml
+
+# Main Playbook details to setup Dynamic 365 on App/SSRS Servers
+- name: D365 App Setup
+  hosts: app
+
+  vars:
+    artifactory_host: ADAVPRDREG01.int.chickasaw.net
+    # Variables control if files should be downloaded
+    download_iso: false
+    download_crm_updates: false
+    download_email_router: false
+    download_scripts: false
+    download_srs_fix: false
+    download_live_id: false
+    download_crm_router: false
+    download_crm_srs: false
+    download_ssrs: false
+    download_backend_xml: false
+
+  tasks:
+    - import_tasks: ../common/install_corporate_certs.yml
+    - import_tasks: app_playbook.yml
+
+
+    
+
+
+

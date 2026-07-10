@@ -1,0 +1,14 @@
+---
+################
+# RKE2
+################
+k8s_platform: rke2
+rke2_cluster_name: cnit-ecs-rke2
+
+# RKE2 defaults (override in group_vars/dev.yml, test.yml, prod.yml)
+rke2_channel: stable
+rke2_cni: canal
+rke2_install_type: server
+
+# Dynatrace Requiements
+dt_oa_version: "1.321.71.20251117-134456"

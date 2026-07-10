@@ -1,0 +1,41 @@
+#######################################
+#       LINUX CERT INSTALLATION       #
+#######################################
+
+# ADD ONLY IF MISSING
+- name: Install corporate CA (only if missing)
+  ansible.builtin.copy:
+    src: "../../files/common/chickasaw-root-ca.crt"
+    dest: /etc/pki/ca-trust/source/anchors/chickasaw-root-ca.crt
+    owner: root
+    group: root
+    mode: '0644'
+    force: false
+  register: ca_copy
+  become: true
+  when: ansible_system == "Linux"
+
+- name: Update CA trust (only if cert was installed)
+  ansible.builtin.command: update-ca-trust extract
+  become: true
+  when:
+    - ansible_system == "Linux"
+    - ca_copy.changed
+
+#######################################
+#     WINDOWS CERT INSTALLATION       #
+#######################################
+
+- name: Copy certificate to Windows host
+  ansible.windows.win_copy:
+    src: ../../files/common/chickasaw-root-ca.crt
+    dest: C:\Temp\chickasaw-root-ca.crt
+  when: ansible_system == "Windows"
+
+- name: Install certificate into Trusted Root store
+  ansible.windows.win_certificate_store:
+    path: C:\Temp\chickasaw-root-ca.crt
+    state: present
+    store_location: LocalMachine
+    store_name: Root
+  when: ansible_system == "Windows"

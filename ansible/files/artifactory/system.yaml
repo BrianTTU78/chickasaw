@@ -1,0 +1,15 @@
+shared:
+  node:
+    ip: 127.0.0.1
+  security:
+    joinKeyFile: /data01/artifactory/var/etc/security/join.key
+    masterKeyFile: /data01/artifactory/var/etc/security/master.key
+  database:
+    type: postgresql
+    driver: org.postgresql.Driver
+    url: "jdbc:postgresql://localhost:5432/artifactory"
+    username: artifactory
+    password: Gaq0$V#Tc6@KUpjqW@WSYfGG
+
+access:
+  extraJavaOpts: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=25"

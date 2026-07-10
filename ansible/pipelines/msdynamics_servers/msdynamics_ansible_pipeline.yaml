@@ -1,0 +1,19 @@
+# REPO: cn_ecs_ansible
+# PIPELINE: pipelines/msdynamics_ansible_pipeline.yaml
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger:
+  branches:
+    include:
+      - main
+      - feature/*
+      - bug/*
+  paths:
+    include:
+      - playbooks/msdynamics_servers/**
+      - files/msdynamics/**
+
+extends:
+  template: d365_ansible_pipeline.yaml
+  parameters:
+    playbook_folder: msdynamics_servers

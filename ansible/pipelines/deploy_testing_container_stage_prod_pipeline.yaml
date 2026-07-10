@@ -1,0 +1,83 @@
+# Repo: cn_ecs_ansible 
+# Pipeline: deploy_testing_container_stage_prod_pipeline.yaml
+
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger: none
+pr: none
+
+parameters:
+- name: ADO_CONTAINER_IMAGE
+  displayName: Docker Container Name
+  type: string
+  default: ado-agent-linux-testing:1.0.9
+
+variables:
+  - group: cn_pipelines_common
+
+stages:
+- stage: DockerDeployStage
+  displayName: 'Stage Deploy'
+
+  variables:
+  - group: cn_pipelines_common
+  - name: GIT_TAG
+    value: $[ stageDependencies.DockerTagBuildPublishStage.DockerBuildJob.outputs['SetGitTag.GIT_TAG'] ]
+
+  pool:
+    name: WS-ECS-STAGE
+
+  jobs:
+  - job: DockerDeployJob
+    displayName: Deploy STAGE
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+
+    steps:
+    - checkout: self
+
+    - task: Bash@3
+      name: DockerDeploy
+      displayName: Deploy 
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/ado_agent_testing_containers/"
+        script: |
+          echo "INFO: Using Docker Image: ${ADO_CONTAINER_IMAGE}"
+          ansible-playbook playbook.yml -i ../../inventories/stage -e "@../../group_vars/stage.yml" -e "ADO_PAT=${ADO_PAT}" -e "ADO_CONTAINER_IMAGE=${ADO_CONTAINER_IMAGE}"
+      env:
+        ADO_PAT: $(ADO_PAT)
+        ADO_CONTAINER_IMAGE: ${{ parameters.ADO_CONTAINER_IMAGE }}
+
+- stage: DockerDeployProd
+  displayName: 'Prod Deploy'
+  dependsOn: 
+    - DockerDeployStage
+
+  variables:
+  - group: cn_pipelines_common
+  - name: GIT_TAG
+    value: $[ stageDependencies.DockerTagBuildPublishStage.DockerBuildJob.outputs['SetGitTag.GIT_TAG'] ]
+
+  pool:
+    name: ADA-ECS-PROD
+
+  jobs:
+  - job: DockerDeployJob
+    displayName: Deploy PROD
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+
+    steps:
+    - checkout: self
+   
+    - task: Bash@3
+      name: DockerDeploy
+      displayName: Deploy 
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/ado_agent_testing_containers/"
+        script: |
+          echo "INFO: Using Docker Image: ${ADO_CONTAINER_IMAGE}"
+          ansible-playbook playbook.yml -i ../../inventories/prod -e "@../../group_vars/prod.yml" -e "ADO_PAT=${ADO_PAT}" -e "ADO_CONTAINER_IMAGE=${ADO_CONTAINER_IMAGE}"
+      env:
+        ADO_PAT: $(ADO_PAT)
+        ADO_CONTAINER_IMAGE: ${{ parameters.ADO_CONTAINER_IMAGE }}

@@ -1,0 +1,15 @@
+# Add MongoDB Repo to YUM Config
+- name: Add MongoDB 8.0 repo without SSL verification
+  ansible.builtin.yum_repository:
+    name: mongodb-org-8.0
+    description: MongoDB Repository
+    baseurl: https://repo.mongodb.org/yum/redhat/9/mongodb-org/8.0/x86_64/
+    gpgcheck: no          # skip GPG key check too
+    sslverify: no         # skip SSL verification
+    enabled: yes
+
+# Install MongoDB
+- name: Install MongoDB
+  ansible.builtin.yum:
+    name: mongodb-org
+    state: present

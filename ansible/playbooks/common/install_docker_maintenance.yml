@@ -1,0 +1,36 @@
+---
+- name: Ensure targeted bin directory exists
+  ansible.builtin.file:
+    path: /home/cnadmin/bin
+    state: directory
+    owner: cnadmin
+    group: cnadmin
+    mode: '0755'
+
+- name: Copy the Docker maintenance script from the repo files directory
+  ansible.builtin.copy:
+    src: "../../files/common/docker_maintenance.sh"  # Sourced relative to your files/ folder
+    dest: /home/cnadmin/bin/docker_maintenance.sh
+    owner: cnadmin
+    group: cnadmin
+    mode: '0750' # Executable by cnadmin, secure from unprivileged users
+
+- name: Initialize the system log file with secure permissions
+  ansible.builtin.file:
+    path: /var/log/docker_maintenance.log
+    state: touch
+    owner: root
+    group: docker
+    mode: '0640'
+    modification_time: preserve
+    access_time: preserve
+
+- name: Schedule the maintenance script to run every Sunday at 2:00 AM
+  ansible.builtin.cron:
+    name: "Run on-prem Docker and Pipeline agent maintenance"
+    user: cnadmin
+    minute: "0"
+    hour: "2"
+    weekday: "0" # 0 represents Sunday
+    job: "sudo /home/cnadmin/bin/docker_maintenance.sh > /dev/null 2>&1"
+    state: present

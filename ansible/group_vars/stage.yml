@@ -1,0 +1,23 @@
+---
+################
+# COMMON
+################
+env: "stage"
+short_env: "stg"
+log_level: 1
+cn_admin_user: cnadmin
+
+################
+# RKE2
+################
+rke2_channel: stable
+rke2_version: "1.34"
+rke2_tls_san: []  # add dev API FQDN/LB if needed
+helm_version: "3.14.4"
+
+################
+# D365
+################
+d365_sql_product_key: "2Q48Q-PB48J-DRCVN-GB844-X2H4Q"
+sql_host:
+  - WINVSTGDYNDB01.int.chickasaw.net

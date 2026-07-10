@@ -1,0 +1,106 @@
+parameters:
+  - name: playbook_folder
+    type: string
+
+variables:
+  - group: cn_pipelines_common
+  - group: cn_pipelines_ansible_common
+
+stages:
+- stage: Test_Deploy
+
+  pool:
+    name: ADA-ECS-PROD
+
+  jobs:
+  - job: AnsibleDeployTest
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    - task: Bash@3
+      displayName: Install Ansible collection
+      inputs:
+        targetType: 'inline'
+        script: |
+          ansible-galaxy collection install -r requirements.yml
+    
+    # STAGE Deployment
+    - task: Bash@3
+      displayName: Test Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          ansible-playbook playbook.yml -i ../../inventories/test -e "@../../group_vars/test.yml" -e "@../../group_vars/all.yml" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN" -e "ansible_password=$ANSIBLE_PASSWORD" -e "ansible_become=false"
+        failOnStderr: false
+      env:
+        DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+        ANSIBLE_PASSWORD: $(ECS_ANSIBLE_PASSWORD)
+
+- stage: Stage_Deploy
+  dependsOn: Test_Deploy
+
+  pool:
+    name: ADA-ECS-PROD
+
+  jobs:
+  - job: AnsibleDeployStage
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    - task: Bash@3
+      displayName: Install Ansible collection
+      inputs:
+        targetType: 'inline'
+        script: |
+          ansible-galaxy collection install -r requirements.yml
+    
+    # STAGE Deployment
+    - task: Bash@3
+      displayName: Stage Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          ansible-playbook playbook.yml -i ../../inventories/stage -e "@../../group_vars/stage.yml" -e "@../../group_vars/all.yml" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN" -e "ansible_password=$ANSIBLE_PASSWORD" -e "ansible_become=false"
+        failOnStderr: false
+      env:
+        DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+        ANSIBLE_PASSWORD: $(ECS_ANSIBLE_PASSWORD)
+
+- stage: Prod_Deploy
+  dependsOn: Stage_Deploy
+
+  pool:
+    name: ADA-ECS-PROD
+
+  jobs:
+  - job: AnsibleDeployProd
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    - task: Bash@3
+      displayName: Install Ansible collection
+      inputs:
+        targetType: 'inline'
+        script: |
+          ansible-galaxy collection install -r requirements.yml
+    
+    # STAGE Deployment
+    - task: Bash@3
+      displayName: Prod Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/${{parameters.playbook_folder}}"
+        script: |
+          ansible-playbook playbook.yml -i ../../inventories/prod -e "@../../group_vars/prod.yml" -e "@../../group_vars/all.yml" -e "DYNATRACE_PAAS_TOKEN=$DYNATRACE_PAAS_TOKEN" -e "ansible_password=$ANSIBLE_PASSWORD" -e "ansible_become=false"
+        failOnStderr: false
+      env:
+        DYNATRACE_PAAS_TOKEN: $(DYNATRACE_PAAS_TOKEN)
+        ANSIBLE_PASSWORD: $(ECS_ANSIBLE_PASSWORD)

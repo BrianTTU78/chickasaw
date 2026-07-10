@@ -1,0 +1,42 @@
+# REPO: cn_ecs_ansible
+# PIPELINE: pipelines/deploy_ansible_dev_pipeline.yaml
+name: ECS_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd).$(Rev:r)
+
+trigger: none
+pr: none
+
+parameters:
+- name: ADO_CONTAINER_IMAGE
+  displayName: Docker Container Name
+  type: string
+  default: az-ado-linux-agent:1.0.25
+
+variables:
+  - group: cn_pipelines_common
+
+stages:
+- stage: Dev_Deploy
+
+  pool:
+    name: ADA-ECS-DEV
+
+  jobs:
+  - job: AnsibleDeployDev
+    displayName: Ansible Real-time Execution
+
+    steps:
+    - checkout: self
+
+    # DEV Deployment
+    - task: Bash@3
+      displayName: Dev Deployment
+      inputs:
+        targetType: 'inline'
+        workingDirectory: "$(Build.SourcesDirectory)/playbooks/ado_agent_containers"
+        script: |
+          ansible-playbook playbook.yml  -i ../../inventories/dev -e "@../../group_vars/dev.yml" -e "ADO_PAT=$ADO_PAT" -e "ADO_CONTAINER_IMAGE=$ADO_CONTAINER_IMAGE"
+        failOnStderr: false
+      env:
+        ADO_PAT: $(ADO_PAT)
+        ADO_CONTAINER_IMAGE: ${{ parameters.ADO_CONTAINER_IMAGE }}
+  

@@ -1,0 +1,50 @@
+- name: Add Docker repo
+  ansible.builtin.yum_repository:
+    name: docker-ce
+    description: Docker CE Repo
+    baseurl: https://download.docker.com/linux/centos/9/x86_64/stable
+    gpgcheck: yes
+    gpgkey: https://download.docker.com/linux/centos/gpg
+    enabled: yes
+    sslverify: no
+
+- name: Add HashiCorp repository
+  ansible.builtin.yum_repository:
+    name: hashicorp
+    description: HashiCorp stable repository
+    baseurl: https://rpm.releases.hashicorp.com/RHEL/$releasever/$basearch/stable
+    gpgcheck: yes
+    gpgkey: https://rpm.releases.hashicorp.com/gpg
+    enabled: yes
+    sslverify: no
+
+- name: Download MinIO mc executable
+  ansible.builtin.get_url:
+    url: https://dl.min.io/client/mc/release/linux-amd64/mc
+    dest: /usr/local/bin/mc
+    mode: '0755'
+    timeout: 60
+  register: download_result
+  retries: 3
+  delay: 10
+  until: download_result is succeeded
+
+- name: Install YUM application specific package
+  yum:
+    name:
+      - git
+      - yum-utils
+      - epel-release
+      - ansible
+      - terraform
+      - docker-ce
+      - docker-ce-cli 
+      - containerd.io 
+      - docker-buildx-plugin 
+      - docker-compose-plugin
+      - device-mapper-persistent-data
+      - lvm2
+    validate_certs: no
+    state: present
+
+

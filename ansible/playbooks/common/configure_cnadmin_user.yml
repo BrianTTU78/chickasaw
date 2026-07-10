@@ -1,0 +1,95 @@
+---
+# CREATE CNADMIN USER
+- name: CNADMIN User creation
+  ansible.builtin.user:
+    name: "{{ cn_admin_user }}"
+    comment: "Created by Ansible"
+    shell: /bin/bash
+    create_home: true
+    home: "/home/{{ cn_admin_user }}"
+    generate_ssh_key: true
+    state: present
+
+# COPY COMMON BASH_PROFILE FROM FILES
+- name: Copy .bash_profile
+  copy:
+    src: ../../files/common/.bash_profile
+    dest: "/home/{{ cn_admin_user }}/.bash_profile"
+    owner: "{{ cn_admin_user }}"
+    group: "{{ cn_admin_user }}"
+    mode: '0644'
+
+# MAKE BANNER
+- name: Generate figlet banner for the hostname
+  command: "figlet {{ ansible_hostname }}"
+  register: figlet_output
+
+# SAVE BANNER TO FILE (ANSIBLE)
+- name: Save figlet banner to file
+  copy:
+    dest: "/home/cnadmin/.bash_banner"
+    content: "{{ figlet_output.stdout }}"
+    owner: cnadmin
+    group: cnadmin
+    mode: '0644'
+  when: figlet_output is defined
+
+# ADD LINE TO BANNER
+- name: Add Line to Banner
+  lineinfile:
+    path: "/home/cnadmin/.bash_banner"
+    line: "You are now cnadmin user ..."
+    state: present
+
+# CREATE COMMON ALIASES
+- name: Create .bash_aliases
+  file:
+    path: "/home/{{ cn_admin_user }}/.bash_aliases"
+    state: touch
+    owner: "{{ cn_admin_user }}"
+    group: "{{ cn_admin_user }}"
+    mode: '0644'
+
+# CREATE ALIASES_OUTPUT
+- name: Create .aliases_output
+  file:
+    path: "/home/{{ cn_admin_user }}/.aliases_output"
+    state: touch
+    owner: "{{ cn_admin_user }}"
+    group: "{{ cn_admin_user }}"
+    mode: '0644'
+
+# ADD USER TO SUDOERS FILE
+- name: Ensure user has passwordless sudo access
+  lineinfile:
+    path: /etc/sudoers
+    line: "{{ cn_admin_user }} ALL=(ALL) NOPASSWD: ALL"
+    create: yes
+    validate: visudo -cf %s
+
+# CREATE/VERIFY .SSH DIRRECTORY
+- name: Ensure .ssh directory exists
+  ansible.builtin.file:
+    path: /home/cnadmin/.ssh
+    state: directory
+    owner: cnadmin
+    group: cnadmin
+    mode: '0700'
+
+# ADD AUTHORIZED KEYS ENTRY FOR ADO AGENTS
+- name: Add ADO agent SSH public key to authorized_keys
+  ansible.posix.authorized_key:
+    user: cnadmin
+    state: present
+    key: "{{ lookup('file', '../../files/ado_agent_servers/ado_prod_agent_master_key.pub') }}"
+
+# add pywinrm to cnadmin so ansible can connect to windows servers
+- name: Install pywinrm for cnadmin user only
+  pip:
+    name:
+      - pywinrm
+    executable: pip3
+    extra_args: "--user"
+  become: yes
+  become_user: cnadmin
+  when: inventory_hostname in ['ADAVDEVADO01', 'WSVPRDADO01', 'ADAVPRDADO01']
